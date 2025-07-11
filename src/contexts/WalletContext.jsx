@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { SUPPORTED_NETWORKS } from '../networks';
 
 const WalletContext = createContext();
 
@@ -18,6 +19,7 @@ export const WalletProvider = ({ children }) => {
   const [connected, setConnected] = useState(false);
   const [chainId, setChainId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [networkInfo, setNetworkInfo] = useState(null);
 
   // Check if wallet is already connected on page load
   useEffect(() => {
@@ -36,6 +38,14 @@ export const WalletProvider = ({ children }) => {
       };
     }
   }, []);
+
+  useEffect(() => {
+    if (chainId && SUPPORTED_NETWORKS[chainId]) {
+      setNetworkInfo(SUPPORTED_NETWORKS[chainId]);
+    } else {
+      setNetworkInfo(null);
+    }
+  }, [chainId]);
 
   const checkConnection = async () => {
     if (window.ethereum) {
@@ -139,6 +149,30 @@ export const WalletProvider = ({ children }) => {
     }
   };
 
+  const isSupportedNetwork = chainId && SUPPORTED_NETWORKS[chainId];
+
+  const addNetwork = async (targetChainId) => {
+    if (!window.ethereum) {
+      throw new Error('MetaMask is not installed');
+    }
+    const net = SUPPORTED_NETWORKS[targetChainId];
+    if (!net) throw new Error('Network config not found');
+    try {
+      await window.ethereum.request({
+        method: 'wallet_addEthereumChain',
+        params: [{
+          chainId: `0x${targetChainId.toString(16)}`,
+          chainName: net.name,
+          rpcUrls: [net.rpcUrl],
+          blockExplorerUrls: [net.explorer],
+          nativeCurrency: net.nativeCurrency || { name: 'ETH', symbol: 'ETH', decimals: 18 },
+        }],
+      });
+    } catch (error) {
+      throw error;
+    }
+  };
+
   const formatAddress = (addr) => {
     if (!addr) return '';
     return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
@@ -154,7 +188,10 @@ export const WalletProvider = ({ children }) => {
     connectWallet,
     disconnect,
     switchNetwork,
-    formatAddress
+    addNetwork,
+    formatAddress,
+    networkInfo,
+    isSupportedNetwork,
   };
 
   return (

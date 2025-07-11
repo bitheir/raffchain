@@ -5,8 +5,6 @@ import { useContract } from '../contexts/ContractContext';
 import { ethers } from 'ethers';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
-import SocialTaskCreator from '../components/SocialTaskCreator';
-import { SocialTaskService } from '../lib/socialTaskService';
 import { Switch } from '../components/ui/switch';
 import { Label } from '../components/ui/label';
 
@@ -257,16 +255,7 @@ function ERC1155DropForm() {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -733,16 +722,7 @@ const PrizedRaffleForm = () => {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -930,16 +910,7 @@ const NonPrizedRaffleForm = () => {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -1131,16 +1102,7 @@ const WhitelistRaffleForm = () => {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -1412,16 +1374,7 @@ const NewERC721DropForm = () => {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -1656,16 +1609,7 @@ function ExistingERC721DropForm() {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -2071,16 +2015,7 @@ function LuckySaleERC721Form() {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -2312,16 +2247,7 @@ function LuckySaleERC1155Form() {
         </div>
         {/* Social Media Tasks Section */}
         <div className="mt-8">
-          <SocialTaskCreator 
-            onTasksChange={handleSocialTasksChange}
-            initialTasks={socialTasks}
-            visible={showSocialTasks}
-            onSubmit={(tasks) => {
-              // Placeholder: show tasks in alert for now
-              alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-              // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-            }}
-          />
+          {/* Placeholder for social media tasks section */}
         </div>
 
         {/* Social Media Tasks Toggle */}
@@ -2338,16 +2264,7 @@ function LuckySaleERC1155Form() {
 
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -2554,16 +2471,7 @@ function ETHGiveawayForm() {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 
@@ -2783,16 +2691,7 @@ function ERC20GiveawayForm() {
         {/* Social Media Tasks Section */}
         {showSocialTasks && (
           <div className="mt-8">
-            <SocialTaskCreator 
-              onTasksChange={handleSocialTasksChange}
-              initialTasks={socialTasks}
-              visible={showSocialTasks}
-              onSubmit={(tasks) => {
-                // Placeholder: show tasks in alert for now
-                alert('Tasks to save: ' + JSON.stringify(tasks, null, 2));
-                // In production, you would call SocialTaskService.createRaffleTasks(raffleAddress, tasks)
-              }}
-            />
+            {/* Placeholder for social media tasks section */}
           </div>
         )}
 

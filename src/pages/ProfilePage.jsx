@@ -7,7 +7,7 @@ import { ethers } from 'ethers';
 import RoyaltyAdjustmentComponent from '../components/RoyaltyAdjustmentComponent';
 import CreatorRevenueWithdrawalComponent from '../components/CreatorRevenueWithdrawalComponent';
 import MinterApprovalComponent from '../components/MinterApprovalComponent';
-import { CONTRACT_ADDRESSES } from '../constants';
+import { SUPPORTED_NETWORKS } from '../networks';
 import { Button } from '../components/ui/button';
 import { PageContainer } from '../components/Layout';
 import ProfileTabs from '../components/ProfileTabs';
@@ -351,7 +351,7 @@ const PurchasedTicketsCard = ({ ticket, onClaimPrize, onClaimRefund }) => {
 };
 
 const ProfilePage = () => {
-  const { connected, address, provider } = useWallet();
+  const { connected, address, provider, chainId } = useWallet();
   const { contracts, getContractInstance, executeTransaction, executeCall } = useContract();
   const navigate = useNavigate();
   

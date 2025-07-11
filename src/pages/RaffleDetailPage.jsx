@@ -7,8 +7,6 @@ import { ethers } from 'ethers';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { PageContainer } from '../components/Layout';
-import SocialTaskCompletion from '../components/SocialTaskCompletion';
-import { SocialTaskService } from '../lib/socialTaskService';
 import { contractABIs } from '../contracts/contractABIs';
 
 const RAFFLE_STATE_LABELS = [

@@ -6,10 +6,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useContract } from '../contexts/ContractContext';
 import { ethers } from 'ethers';
 import { contractABIs } from '../contracts/contractABIs';
-import { CONTRACT_ADDRESSES } from '../constants';
+import { SUPPORTED_NETWORKS } from '../networks';
+import NetworkSelector from './ui/network-selector';
 
 const Header = () => {
-  const { connected, address, formatAddress, disconnect, provider } = useWallet();
+  const { connected, address, formatAddress, disconnect, provider, chainId } = useWallet();
   const { contracts, getContractInstance } = useContract();
   const [showWalletModal, setShowWalletModal] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -51,7 +52,7 @@ const Header = () => {
   // Fetch all raffles once for searching
   useEffect(() => {
     const fetchAllRaffles = async () => {
-      if (!provider) {
+      if (!provider || !chainId || !SUPPORTED_NETWORKS[chainId]) {
         return;
       }
       
@@ -61,7 +62,7 @@ const Header = () => {
       }
       
       try {
-        const raffleManagerAddress = CONTRACT_ADDRESSES.raffleManager;
+        const raffleManagerAddress = SUPPORTED_NETWORKS[chainId].contractAddresses.RaffleManager;
         const raffleManagerContract = new ethers.Contract(raffleManagerAddress, contractABIs.raffleManager, provider);
         
         const registeredRaffles = await raffleManagerContract.getAllRaffles();
@@ -99,7 +100,7 @@ const Header = () => {
       }
     };
     fetchAllRaffles();
-  }, [provider]);
+  }, [provider, chainId]);
 
   // Monitor allRaffles changes
   useEffect(() => {
@@ -275,6 +276,8 @@ const Header = () => {
                     )}
                   </div>
                 </div>
+                {/* Network Selector inserted here */}
+                <NetworkSelector />
                 {connected ? (
                   <div className="relative" ref={dropdownRef}>
                     <button

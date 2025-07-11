@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { SUPPORTED_NETWORKS } from '../networks';
 import { useWallet } from './WalletContext';
 import { contractABIs } from '../contracts/contractABIs';
-import { CONTRACT_ADDRESSES } from '../constants';
 
 const ContractContext = createContext();
 
@@ -15,7 +15,7 @@ export const useContract = () => {
 };
 
 export const ContractProvider = ({ children }) => {
-  const { signer, provider, connected } = useWallet();
+  const { signer, provider, connected, chainId } = useWallet();
   const [contracts, setContracts] = useState({});
 
   // Initialize contracts when wallet is connected and addresses are available
@@ -32,33 +32,33 @@ export const ContractProvider = ({ children }) => {
 
     try {
       // Initialize main contracts
-      if (CONTRACT_ADDRESSES.raffleManager) {
+      if (SUPPORTED_NETWORKS[chainId]?.contractAddresses?.raffleManager) {
         newContracts.raffleManager = new ethers.Contract(
-          CONTRACT_ADDRESSES.raffleManager,
+          SUPPORTED_NETWORKS[chainId]?.contractAddresses?.raffleManager,
           contractABIs.raffleManager,
           signer
         );
       }
 
-      if (CONTRACT_ADDRESSES.raffleDeployer) {
+      if (SUPPORTED_NETWORKS[chainId]?.contractAddresses?.raffleDeployer) {
         newContracts.raffleDeployer = new ethers.Contract(
-          CONTRACT_ADDRESSES.raffleDeployer,
+          SUPPORTED_NETWORKS[chainId]?.contractAddresses?.raffleDeployer,
           contractABIs.raffleDeployer,
           signer
         );
       }
 
-      if (CONTRACT_ADDRESSES.revenueManager) {
+      if (SUPPORTED_NETWORKS[chainId]?.contractAddresses?.revenueManager) {
         newContracts.revenueManager = new ethers.Contract(
-          CONTRACT_ADDRESSES.revenueManager,
+          SUPPORTED_NETWORKS[chainId]?.contractAddresses?.revenueManager,
           contractABIs.revenueManager,
           signer
         );
       }
 
-      if (CONTRACT_ADDRESSES.nftFactory) {
+      if (SUPPORTED_NETWORKS[chainId]?.contractAddresses?.nftFactory) {
         newContracts.nftFactory = new ethers.Contract(
-          CONTRACT_ADDRESSES.nftFactory,
+          SUPPORTED_NETWORKS[chainId]?.contractAddresses?.nftFactory,
           contractABIs.nftFactory,
           signer
         );

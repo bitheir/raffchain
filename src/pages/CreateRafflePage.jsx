@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Label } from '../components/ui/label';
+import TokenPreApproval from '../components/TokenPreApproval';
 
 function ERC1155DropForm() {
   const { connected, address } = useWallet();
@@ -1676,7 +1677,7 @@ const CreateRafflePage = () => {
 
   // --- Dropdown Filter Card UI ---
   const renderFilterCard = () => (
-    <div className="flex flex-col gap-4 p-6 bg-card border border-border rounded-xl min-h-0">
+    <div className="flex flex-col gap-4 p-6 bg-card border border-border rounded-xl min-h-0 w-96 max-w-full">
       {/* Raffle Type */}
       <div className="flex flex-col gap-2">
         <label className="font-semibold text-sm whitespace-nowrap">Raffle Type</label>
@@ -1760,6 +1761,13 @@ const CreateRafflePage = () => {
     return null;
   };
 
+  // Helper to get RaffleDeployer address from network
+  const getRaffleDeployerAddress = () => {
+    const chainId = contracts?.chainId;
+    if (!chainId || !contracts?.SUPPORTED_NETWORKS) return '';
+    return contracts.SUPPORTED_NETWORKS[chainId]?.contractAddresses?.raffleDeployer || '';
+  };
+
   if (!connected) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1780,19 +1788,29 @@ const CreateRafflePage = () => {
             Create an on-chain raffle for your community
           </h1>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-8 max-w-7xl mx-auto mt-16">
-          <div className="lg:col-span-1">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 max-w-7xl mx-auto mt-16">
+          <div className="lg:col-span-1 flex flex-col items-start gap-6" style={{ minWidth: '24rem', maxWidth: '24rem' }}>
             {renderFilterCard()}
+            {/* Token Pre-Approval logic */}
+            {(
+              (raffleType === 'NFTDrop' && nftStandard === 'ERC1155') ||
+              (raffleType === 'Lucky Sale/NFT Giveaway' && nftStandard === 'ERC721') ||
+              (raffleType === 'Lucky Sale/NFT Giveaway' && nftStandard === 'ERC1155') ||
+              (raffleType === 'ERC20 Token Giveaway')
+            ) && (
+              <TokenPreApproval raffleDeployerAddress={getRaffleDeployerAddress()} />
+            )}
             {raffleType === 'NFTDrop' && nftStandard === 'ERC1155' && (
               <Link
                 to="/deploy-erc1155-collection"
-                className="block mt-6 bg-gradient-to-r from-green-500 to-teal-600 text-white px-5 py-3 rounded-lg hover:from-green-600 hover:to-teal-700 transition-colors flex items-center justify-center gap-2 text-base h-12"
+                className="block w-full mt-2 bg-gradient-to-r from-green-500 to-teal-600 text-white px-5 py-3 rounded-lg hover:from-green-600 hover:to-teal-700 transition-colors flex items-center justify-center gap-2 text-base h-12"
+                style={{ minWidth: '100%' }}
               >
                 Deploy ERC1155 Collection
               </Link>
             )}
           </div>
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 lg:ml-10">
             {renderForm()}
           </div>
         </div>

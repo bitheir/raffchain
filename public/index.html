@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Token Approval for Raffle Creator</title>
+    
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Load React libraries -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    
+    <!-- Load Babel to transpile JSX in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Load Ethers.js library -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js" type="application/javascript"></script>
+    
+    <style>
+        /* A simple style to match the component's dark theme */
+        body {
+            background-color: #111827; /* bg-gray-900 */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // The React component code goes here.
+
+        // --- Helper Components ---
+        const InputField = ({ label, value, onChange, placeholder, type = "text" }) => (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+            <input
+              type={type}
+              value={value}
+              onChange={onChange}
+              placeholder={placeholder}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white transition-colors"
+            />
+          </div>
+        );
+
+        const SelectField = ({ label, value, onChange, options }) => (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">{label}</label>
+            <select
+              value={value}
+              onChange={onChange}
+              className="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-white transition-colors"
+            >
+              {options.map(option => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </div>
+        );
+
+        const MessageCard = ({ message, type }) => {
+          if (!message) return null;
+          const baseClasses = "p-4 rounded-lg mt-4 text-center";
+          const typeClasses = {
+            success: "bg-green-900 border border-green-700 text-green-200",
+            error: "bg-red-900 border border-red-700 text-red-200",
+            info: "bg-blue-900 border border-blue-700 text-blue-200",
+          };
+          return <div className={`${baseClasses} ${typeClasses[type]}`}>{message}</div>;
+        };
+
+        // --- Main Approval Component ---
+        const TokenApproval = () => {
+          const [signer, setSigner] = React.useState(null);
+          const [userAddress, setUserAddress] = React.useState('');
+          const [prizeType, setPrizeType] = React.useState('ERC721');
+          const [raffleDeployerAddress, setRaffleDeployerAddress] = React.useState('');
+          const [tokenAddress, setTokenAddress] = React.useState('');
+          const [amountOrId, setAmountOrId] = React.useState('');
+          const [loading, setLoading] = React.useState(false);
+          const [message, setMessage] = React.useState('');
+          const [messageType, setMessageType] = React.useState('info');
+
+          const ERC20_ABI = ["function approve(address spender, uint256 amount) public returns (bool)"];
+          const ERC721_ABI = ["function approve(address to, uint256 tokenId) public", "function getApproved(uint256 tokenId) public view returns (address)"];
+          const ERC1155_ABI = ["function setApprovalForAll(address operator, bool approved) public", "function isApprovedForAll(address account, address operator) public view returns (bool)"];
+
+          React.useEffect(() => {
+            if (!window.ethereum) {
+              setMessage('Please install MetaMask to use this application.');
+              setMessageType('error');
+            }
+          }, []);
+          
+          const connectWallet = async () => {
+            if (!window.ethereum) {
+                setMessage('Please install MetaMask.');
+                setMessageType('error');
+                return;
+            }
+            try {
+              // Directly request accounts using the EIP-1193 standard
+              const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+              
+              if (accounts.length === 0) {
+                  setMessage('No accounts found. Please unlock your wallet or create an account.');
+                  setMessageType('error');
+                  return;
+              }
+
+              // Once connected, wrap the provider with ethers
+              const provider = new window.ethers.providers.Web3Provider(window.ethereum);
+              const web3Signer = provider.getSigner();
+              const address = await web3Signer.getAddress();
+
+              setSigner(web3Signer);
+              setUserAddress(address);
+              setMessage(`Wallet connected: ${address.substring(0, 6)}...${address.substring(address.length - 4)}`);
+              setMessageType('success');
+
+            } catch (error) {
+              console.error("Failed to connect wallet:", error);
+              if (error.code === 4001) { // EIP-1193 user rejected request error
+                setMessage('You rejected the connection request.');
+              } else {
+                setMessage('Failed to connect wallet. Please try again.');
+              }
+              setMessageType('error');
+            }
+          };
+
+          const handleApprove = async () => {
+            if (!signer || !window.ethers) {
+              setMessage('Please connect your wallet first.');
+              setMessageType('error');
+              return;
+            }
+            if (!window.ethers.utils.isAddress(raffleDeployerAddress) || !window.ethers.utils.isAddress(tokenAddress)) {
+              setMessage('Please enter valid contract addresses.');
+              setMessageType('error');
+              return;
+            }
+            if (!amountOrId) {
+                setMessage(`Please enter a valid ${prizeType === 'ERC20' ? 'amount' : 'Token ID'}.`);
+                setMessageType('error');
+                return;
+            }
+
+            setLoading(true);
+            setMessage(`Preparing approval transaction for ${prizeType}...`);
+            setMessageType('info');
+
+            try {
+              let tx;
+              const tokenContract = new window.ethers.Contract(tokenAddress, getAbiForPrizeType(), signer);
+
+              switch (prizeType) {
+                case 'ERC20':
+                  const decimals = 18;
+                  const weiAmount = window.ethers.utils.parseUnits(amountOrId, decimals);
+                  setMessage(`Approving ${amountOrId} tokens... Please confirm in your wallet.`);
+                  tx = await tokenContract.approve(raffleDeployerAddress, weiAmount);
+                  break;
+                case 'ERC721':
+                  setMessage(`Approving Token ID #${amountOrId}... Please confirm in your wallet.`);
+                  tx = await tokenContract.approve(raffleDeployerAddress, amountOrId);
+                  break;
+                case 'ERC1155':
+                  setMessage('Approving for all tokens... Please confirm in your wallet.');
+                  tx = await tokenContract.setApprovalForAll(raffleDeployerAddress, true);
+                  break;
+                default:
+                  throw new Error('Invalid prize type selected');
+              }
+
+              setMessage('Transaction sent. Waiting for confirmation...');
+              await tx.wait(1);
+
+              setMessage('Approval successful! You can now create the raffle.');
+              setMessageType('success');
+            } catch (error) {
+              console.error("Approval failed:", error);
+              setMessage(error.reason || error.message || 'An unknown error occurred.');
+              setMessageType('error');
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          const getAbiForPrizeType = () => {
+            switch (prizeType) {
+              case 'ERC20': return ERC20_ABI;
+              case 'ERC721': return ERC721_ABI;
+              case 'ERC1155': return ERC1155_ABI;
+              default: return [];
+            }
+          };
+          
+          const getInputLabel = () => {
+              switch (prizeType) {
+                  case 'ERC20': return 'Token Amount';
+                  case 'ERC721': return 'Token ID';
+                  case 'ERC1155': return 'Token ID (for balance check, not approval)';
+                  default: return 'Amount / ID';
+              }
+          };
+
+          return (
+            <div className="min-h-screen flex items-center justify-center font-sans p-4">
+              <div className="w-full max-w-lg bg-gray-800 p-8 rounded-2xl shadow-2xl space-y-6">
+                <div className="text-center">
+                  <h1 className="text-3xl font-bold text-white mb-2">Prize Token Approval</h1>
+                  <p className="text-gray-400">Grant permission to the Raffle Deployer before creating a raffle.</p>
+                </div>
+
+                {!userAddress ? (
+                    <button
+                        onClick={connectWallet}
+                        className="w-full bg-blue-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-blue-700 transition-all duration-300 ease-in-out transform hover:scale-105"
+                    >
+                        Connect Wallet
+                    </button>
+                ) : (
+                    <div className="space-y-4">
+                        <SelectField
+                            label="Prize Token Standard"
+                            value={prizeType}
+                            onChange={(e) => setPrizeType(e.target.value)}
+                            options={[
+                                { value: 'ERC721', label: 'ERC721 (Single NFT)' },
+                                { value: 'ERC1155', label: 'ERC1155 (Collection)' },
+                                { value: 'ERC20', label: 'ERC20 (Fungible Token)' },
+                            ]}
+                        />
+                        <InputField
+                            label="Raffle Deployer Address"
+                            value={raffleDeployerAddress}
+                            onChange={(e) => setRaffleDeployerAddress(e.target.value)}
+                            placeholder="0x..."
+                        />
+                        <InputField
+                            label="Prize Token Address"
+                            value={tokenAddress}
+                            onChange={(e) => setTokenAddress(e.target.value)}
+                            placeholder="0x..."
+                        />
+                        <InputField
+                            label={getInputLabel()}
+                            value={amountOrId}
+                            onChange={(e) => setAmountOrId(e.target.value)}
+                            placeholder={prizeType === 'ERC20' ? 'e.g., 1000' : 'e.g., 42'}
+                            type="text"
+                        />
+                        <button
+                            onClick={handleApprove}
+                            disabled={loading}
+                            className="w-full bg-green-600 text-white font-bold py-3 px-4 rounded-lg hover:bg-green-700 transition-all duration-300 ease-in-out transform hover:scale-105 disabled:bg-gray-500 disabled:cursor-not-allowed disabled:scale-100"
+                        >
+                            {loading ? 'Approving...' : 'Grant Approval'}
+                        </button>
+                    </div>
+                )}
+                <MessageCard message={message} type={messageType} />
+              </div>
+            </div>
+          );
+        };
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<TokenApproval />);
+    </script>
+</body>
+</html>

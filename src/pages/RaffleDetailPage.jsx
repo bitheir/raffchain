@@ -37,6 +37,8 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
   const [activating, setActivating] = useState(false);
   // 1. Add usesCustomPrice state to TicketPurchaseSection
   const [usesCustomPrice, setUsesCustomPrice] = useState(null);
+  // Add state for ending the raffle
+  const [endingRaffle, setEndingRaffle] = useState(false);
 
   useEffect(() => {
     loadSocialTasks();
@@ -222,6 +224,32 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
   const now = Math.floor(Date.now() / 1000);
   const canActivate = raffle && raffle.startTime ? now >= raffle.startTime : false;
 
+  // Helper to check if raffle duration has ended
+  const hasRaffleEndedByTime = () => {
+    const now = Math.floor(Date.now() / 1000);
+    return (raffle.startTime + raffle.duration) <= now && raffle.stateNum === 1; // Only allow if still active
+  };
+
+  // Handler for ending the raffle
+  const handleEndRaffle = async () => {
+    setEndingRaffle(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) throw new Error('Failed to get raffle contract');
+      const result = await executeTransaction(raffleContract.endRaffle);
+      if (result.success) {
+        alert('Raffle ended successfully!');
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      alert('End Raffle failed: ' + (err?.message || err));
+    } finally {
+      setEndingRaffle(false);
+    }
+  };
+
   return (
     <div className="bg-background border border-border rounded-lg p-6">
       <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -316,14 +344,34 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
                   <span className="text-lg font-bold">{totalCost} ETH</span>
                 </div>
               </div>
-              <button
-                onClick={handlePurchase}
-                disabled={loading || !connected || !canPurchaseTickets()}
-                className="w-full bg-blue-600 dark:bg-blue-500 text-white px-6 py-3 rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                <Ticket className="h-4 w-4" />
-                {loading ? 'Processing...' : `Purchase ${quantity} Ticket${quantity > 1 ? 's' : ''}`}
-              </button>
+              {raffle.stateNum === 0 && canActivate ? (
+                <button
+                  onClick={handleActivateRaffle}
+                  disabled={activating || !connected}
+                  className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-md hover:from-green-700 hover:to-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+                >
+                  <Trophy className="h-4 w-4" />
+                  {activating ? 'Activating...' : 'Activate Raffle'}
+                </button>
+              ) : hasRaffleEndedByTime() ? (
+                <button
+                  onClick={handleEndRaffle}
+                  disabled={endingRaffle || !connected}
+                  className="w-full bg-gradient-to-r from-red-600 to-orange-600 text-white px-6 py-3 rounded-md hover:from-red-700 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+                >
+                  <Trophy className="h-4 w-4" />
+                  {endingRaffle ? 'Ending...' : 'End Raffle'}
+                </button>
+              ) : (
+                <button
+                  onClick={handlePurchase}
+                  disabled={loading || !connected || !canPurchaseTickets()}
+                  className="w-full bg-blue-600 dark:bg-blue-500 text-white px-6 py-3 rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <Ticket className="h-4 w-4" />
+                  {loading ? 'Processing...' : `Purchase ${quantity} Ticket${quantity > 1 ? 's' : ''}`}
+                </button>
+              )}
             </>
           )}
 
@@ -956,6 +1004,9 @@ const RaffleDetailPage = () => {
   const [isERC721Approved, setIsERC721Approved] = useState(false);
   const [checkingERC721Approval, setCheckingERC721Approval] = useState(false);
   const [approvingERC721, setApprovingERC721] = useState(false);
+  // Add state to track if prizes are already deposited
+  const [prizesAlreadyDeposited, setPrizesAlreadyDeposited] = useState(false);
+  const [checkingPrizeDeposit, setCheckingPrizeDeposit] = useState(false);
 
   // Add these states and handler at the top level of RaffleDetailPage (inside the component):
   const [showMintInput, setShowMintInput] = useState(false);
@@ -1201,6 +1252,89 @@ const RaffleDetailPage = () => {
     }
     fetchEscrowedPrizeFlag();
   }, [raffleAddress, getContractInstance]);
+
+  // Check if prizes are already deposited
+  useEffect(() => {
+    const checkPrizeDeposit = async () => {
+      if (!raffle || !getContractInstance) return;
+      
+      setCheckingPrizeDeposit(true);
+      try {
+        const raffleContract = getContractInstance(raffle.address, 'raffle');
+        if (!raffleContract) return;
+
+        let deposited = false;
+
+        // Check ETH prize
+        if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
+          console.log('Checking ETH prize deposit status...');
+          console.log('Required ETH Amount:', raffle.ethPrizeAmount.toString());
+          const contractBalance = await raffleContract.provider.getBalance(raffle.address);
+          console.log('Contract ETH Balance:', contractBalance.toString());
+          deposited = contractBalance.gte(raffle.ethPrizeAmount);
+          console.log('Deposited:', deposited);
+        }
+        // Check ERC20 prize
+        else if (raffle.erc20PrizeToken && raffle.erc20PrizeToken !== ethers.constants.AddressZero && raffle.erc20PrizeAmount && raffle.erc20PrizeAmount.gt && raffle.erc20PrizeAmount.gt(0)) {
+          console.log('Checking ERC20 prize deposit status...');
+          console.log('ERC20 Token:', raffle.erc20PrizeToken);
+          console.log('Required Amount:', raffle.erc20PrizeAmount.toString());
+          const erc20Contract = new ethers.Contract(raffle.erc20PrizeToken, contractABIs.erc20, raffleContract.provider);
+          const contractBalance = await erc20Contract.balanceOf(raffle.address);
+          console.log('Contract Balance:', contractBalance.toString());
+          deposited = contractBalance.gte(raffle.erc20PrizeAmount);
+          console.log('Deposited:', deposited);
+        }
+        // Check NFT prizes (ERC721/ERC1155)
+        else if (raffle.prizeCollection && raffle.prizeCollection !== ethers.constants.AddressZero) {
+          console.log('Checking NFT prize deposit status...');
+          console.log('Prize Collection:', raffle.prizeCollection);
+          console.log('Standard:', raffle.standard);
+          console.log('Token ID:', raffle.prizeTokenId);
+          
+          if (raffle.standard === 0) { // ERC721
+            const erc721Contract = new ethers.Contract(raffle.prizeCollection, contractABIs.erc721Prize, raffleContract.provider);
+            try {
+              const owner = await erc721Contract.ownerOf(raffle.prizeTokenId);
+              console.log('ERC721 Owner:', owner);
+              deposited = owner.toLowerCase() === raffle.address.toLowerCase();
+              console.log('Deposited:', deposited);
+            } catch (e) {
+              console.log('ERC721 Error:', e);
+              deposited = false;
+            }
+          } else if (raffle.standard === 1) { // ERC1155
+            const erc1155Contract = new ethers.Contract(raffle.prizeCollection, contractABIs.erc1155Prize, raffleContract.provider);
+            try {
+              const balance = await erc1155Contract.balanceOf(raffle.address, raffle.prizeTokenId);
+              console.log('ERC1155 Balance:', balance.toString());
+              deposited = balance.gt(0);
+              console.log('Deposited:', deposited);
+            } catch (e) {
+              console.log('ERC1155 Error:', e);
+              deposited = false;
+            }
+          }
+        }
+
+        // If no prize type is detected, assume not deposited
+        if (!raffle.ethPrizeAmount && !raffle.erc20PrizeToken && !raffle.prizeCollection) {
+          console.log('No prize type detected, assuming not deposited');
+          deposited = false;
+        }
+
+        console.log('Final deposited status:', deposited);
+        setPrizesAlreadyDeposited(deposited);
+      } catch (e) {
+        console.error('Error checking prize deposit status:', e);
+        setPrizesAlreadyDeposited(false);
+      } finally {
+        setCheckingPrizeDeposit(false);
+      }
+    };
+
+    checkPrizeDeposit();
+  }, [raffle, getContractInstance]);
 
   // Check ERC1155 approval status if needed
   useEffect(() => {
@@ -1484,7 +1618,9 @@ const RaffleDetailPage = () => {
     console.log('isEscrowedPrize:', isEscrowedPrize);
     console.log('is1155Approved:', is1155Approved);
     console.log('checkingApproval:', checkingApproval);
-  }, [raffle, isEscrowedPrize, is1155Approved, checkingApproval]);
+    console.log('prizesAlreadyDeposited:', prizesAlreadyDeposited);
+    console.log('checkingPrizeDeposit:', checkingPrizeDeposit);
+  }, [raffle, isEscrowedPrize, is1155Approved, checkingApproval, prizesAlreadyDeposited, checkingPrizeDeposit]);
 
   // Determine if activation is allowed
   const now = Math.floor(Date.now() / 1000);
@@ -1623,29 +1759,24 @@ const RaffleDetailPage = () => {
               raffle.erc20PrizeToken &&
               raffle.erc20PrizeToken !== ethers.constants.AddressZero &&
               raffle.erc20PrizeAmount &&
-              !isERC20Approved && (
-                <Button
-                  onClick={handleApproveERC20}
-                  className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={approvingERC20 || checkingERC20Approval}
-                >
-                  {approvingERC20 ? 'Approving...' : 'Approve ERC20 Prize'}
-                </Button>
-            )}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize &&
-              raffle.erc20PrizeToken &&
-              raffle.erc20PrizeToken !== ethers.constants.AddressZero &&
-              raffle.erc20PrizeAmount &&
-              isERC20Approved && (
-                <Button
-                  onClick={handleDepositPrize}
-                  className="ml-2 bg-green-600 hover:bg-green-700 text-white"
-                  disabled={depositingPrize}
-                >
-                  {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
-                </Button>
+              !prizesAlreadyDeposited && (
+                !isERC20Approved ? (
+                  <Button
+                    onClick={handleApproveERC20}
+                    className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={approvingERC20 || checkingERC20Approval}
+                  >
+                    {approvingERC20 ? 'Approving...' : 'Approve ERC20 Prize'}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleDepositPrize}
+                    className="ml-2 bg-green-600 hover:bg-green-700 text-white"
+                    disabled={depositingPrize}
+                  >
+                    {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
+                  </Button>
+                )
             )}
             {/* ERC721 Approval and Deposit Prize logic */}
             {connected &&
@@ -1654,36 +1785,31 @@ const RaffleDetailPage = () => {
               raffle.standard === 0 &&
               raffle.prizeCollection &&
               typeof raffle.prizeTokenId !== 'undefined' &&
-              !isERC721Approved && (
-                <Button
-                  onClick={handleApproveERC721}
-                  className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={approvingERC721 || checkingERC721Approval}
-                >
-                  {approvingERC721 ? 'Approving...' : 'Approve NFT Prize'}
-                </Button>
-            )}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize &&
-              raffle.standard === 0 &&
-              raffle.prizeCollection &&
-              typeof raffle.prizeTokenId !== 'undefined' &&
-              isERC721Approved && (
-                <Button
-                  onClick={handleDepositPrize}
-                  className="ml-2 bg-green-600 hover:bg-green-700 text-white"
-                  disabled={depositingPrize}
-                >
-                  {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
-                </Button>
+              !prizesAlreadyDeposited && (
+                !isERC721Approved ? (
+                  <Button
+                    onClick={handleApproveERC721}
+                    className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
+                    disabled={approvingERC721 || checkingERC721Approval}
+                  >
+                    {approvingERC721 ? 'Approving...' : 'Approve NFT Prize'}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleDepositPrize}
+                    className="ml-2 bg-green-600 hover:bg-green-700 text-white"
+                    disabled={depositingPrize}
+                  >
+                    {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
+                  </Button>
+                )
             )}
             {/* ERC1155 Approval and Deposit Prize logic */}
             {connected &&
               address?.toLowerCase() === raffle.creator.toLowerCase() &&
               isEscrowedPrize &&
               raffle.standard === 1 &&
-              (
+              !prizesAlreadyDeposited && (
                 checkingApproval ? (
                   <Button disabled className="ml-2 bg-blue-300 text-white">Checking approval...</Button>
                 ) : !is1155Approved ? (
@@ -1720,6 +1846,20 @@ const RaffleDetailPage = () => {
                 </Button>
               )
             }
+            {/* Prize Deposit Status Indicator */}
+            {connected &&
+              address?.toLowerCase() === raffle.creator.toLowerCase() &&
+              isEscrowedPrize && (
+                checkingPrizeDeposit ? (
+                  <div className="ml-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                    Checking deposit status...
+                  </div>
+                ) : prizesAlreadyDeposited ? (
+                  <div className="ml-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                    ✓ Prize Deposited
+                  </div>
+                ) : null
+            )}
             {!raffle.isPrized &&
               raffle.stateNum === 0 &&
               connected &&

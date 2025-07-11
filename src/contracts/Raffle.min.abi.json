@@ -84,5 +84,6 @@
     "type": "function"
   },
   { "inputs": [], "name": "activate", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
-  { "inputs": [], "name": "withdrawCreatorRevenue", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
+  { "inputs": [], "name": "withdrawCreatorRevenue", "outputs": [], "stateMutability": "nonpayable", "type": "function" },
+  { "inputs": [], "name": "endRaffle", "outputs": [], "stateMutability": "nonpayable", "type": "function" }
 ] 

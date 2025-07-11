@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 import { SUPPORTED_NETWORKS } from '../networks';
 import { useWallet } from './WalletContext';
 import { contractABIs } from '../contracts/contractABIs';
+import { toast } from "sonner";
 
 const ContractContext = createContext();
 
@@ -89,8 +90,9 @@ export const ContractProvider = ({ children }) => {
       const receipt = await tx.wait();
       return { success: true, receipt, hash: tx.hash };
     } catch (error) {
-      console.error('Transaction failed:', error);
-      return { success: false, error: error.message };
+      let message = error?.reason || error?.data?.message || error?.message || 'Transaction failed';
+      toast.error(message);
+      return { success: false, error: message };
     }
   };
 
@@ -100,8 +102,9 @@ export const ContractProvider = ({ children }) => {
       const result = await contractMethod(...args);
       return { success: true, result };
     } catch (error) {
-      console.error('Contract call failed:', error);
-      return { success: false, error: error.message };
+      let message = error?.reason || error?.data?.message || error?.message || 'Contract call failed';
+      toast.error(message);
+      return { success: false, error: message };
     }
   };
 

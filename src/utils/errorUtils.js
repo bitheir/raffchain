@@ -6,6 +6,14 @@
 export const extractRevertMessage = (error) => {
   if (!error) return 'Transaction failed';
   
+  // Debug logging to see error structure
+  console.log('Error object:', error);
+  console.log('Error message:', error.message);
+  console.log('Error data:', error.data);
+  console.log('Error reason:', error.reason);
+  console.log('Error code:', error.code);
+  console.log('Error toString:', error.toString());
+  
   const errorMessage = error.message || error.toString();
   
   // Common patterns for revert messages
@@ -28,6 +36,18 @@ export const extractRevertMessage = (error) => {
     /reverted[:\s]+(.+)/i,
     // Error messages in parentheses
     /\(([^)]+)\)/,
+    // Newer ethers.js error format: "VM Exception while processing transaction: reverted with reason string 'Raffle is not in pending state'"
+    /reverted with reason string '([^']+)'/i,
+    // Another ethers.js format: "VM Exception while processing transaction: reverted with custom error"
+    /reverted with custom error/i,
+    // Error messages in square brackets
+    /\[([^\]]+)\]/,
+    // Another common format: "Transaction reverted: Raffle is not in pending state"
+    /Transaction reverted: (.+)/i,
+    // VM Exception format: "VM Exception while processing transaction: reverted with reason string 'Raffle is not in pending state'"
+    /VM Exception while processing transaction: reverted with reason string '([^']+)'/i,
+    // Another VM Exception format: "VM Exception while processing transaction: reverted"
+    /VM Exception while processing transaction: reverted/i,
   ];
   
   // Try to extract meaningful message from patterns
@@ -67,6 +87,38 @@ export const extractRevertMessage = (error) => {
       }
     } catch (e) {
       // Ignore decoding errors
+    }
+  }
+  
+  // Try to extract from error.reason (newer ethers.js format)
+  if (error.reason) {
+    return error.reason;
+  }
+  
+  // Try to extract from error.error if it exists
+  if (error.error && error.error.message) {
+    const nestedError = extractRevertMessage(error.error);
+    if (nestedError !== 'Transaction failed') {
+      return nestedError;
+    }
+  }
+  
+  // Try to extract from error.transaction if it exists (ethers.js v6 format)
+  if (error.transaction && error.transaction.data) {
+    try {
+      // This might contain the revert reason
+      console.log('Error transaction data:', error.transaction.data);
+    } catch (e) {
+      // Ignore
+    }
+  }
+  
+  // Try to extract from error.receipt if it exists
+  if (error.receipt && error.receipt.logs) {
+    try {
+      console.log('Error receipt logs:', error.receipt.logs);
+    } catch (e) {
+      // Ignore
     }
   }
   

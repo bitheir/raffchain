@@ -1376,17 +1376,19 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.prizeCollection || !address) return;
     setApproving(true);
     try {
-      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
-      const signer = provider.getSigner();
-      const erc1155 = new ethers.Contract(
-        raffle.prizeCollection,
-        contractABIs.erc1155Prize,
-        signer
-      );
-      const tx = await erc1155.setApprovalForAll(raffle.address, true);
-      await tx.wait();
-      setIs1155Approved(true);
-      toast.success('Approval successful! You can now deposit the prize.');
+      const erc1155 = getContractInstance(raffle.prizeCollection, 'erc1155Prize');
+      if (!erc1155) {
+        throw new Error('Failed to get ERC1155 contract instance');
+      }
+      
+      const result = await executeTransaction(erc1155.setApprovalForAll, raffle.address, true);
+      
+      if (result.success) {
+        setIs1155Approved(true);
+        toast.success('Approval successful! You can now deposit the prize.');
+      } else {
+        throw new Error(result.error);
+      }
     } catch (e) {
       toast.error('Approval failed: ' + (e?.reason || e?.message || e));
     } finally {
@@ -1431,18 +1433,20 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.erc20PrizeToken || !raffle.erc20PrizeAmount || !address) return;
     setApprovingERC20(true);
     try {
-      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
-      const signer = provider.getSigner();
-      const erc20 = new ethers.Contract(
-        raffle.erc20PrizeToken,
-        contractABIs.erc20,
-        signer
-      );
+      const erc20 = getContractInstance(raffle.erc20PrizeToken, 'erc20');
+      if (!erc20) {
+        throw new Error('Failed to get ERC20 contract instance');
+      }
+      
       // Approve max uint256 for convenience
-      const tx = await erc20.approve(raffle.address, ethers.constants.MaxUint256);
-      await tx.wait();
-      setIsERC20Approved(true);
-      toast.success('ERC20 approval successful! You can now deposit the prize.');
+      const result = await executeTransaction(erc20.approve, raffle.address, ethers.constants.MaxUint256);
+      
+      if (result.success) {
+        setIsERC20Approved(true);
+        toast.success('ERC20 approval successful! You can now deposit the prize.');
+      } else {
+        throw new Error(result.error);
+      }
     } catch (e) {
       toast.error('ERC20 approval failed: ' + (e?.reason || e?.message || e));
     } finally {
@@ -1494,17 +1498,19 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.prizeCollection || typeof raffle.prizeTokenId === 'undefined' || !address) return;
     setApprovingERC721(true);
     try {
-      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
-      const signer = provider.getSigner();
-      const erc721 = new ethers.Contract(
-        raffle.prizeCollection,
-        contractABIs.erc721Prize,
-        signer
-      );
-      const tx = await erc721.approve(raffle.address, raffle.prizeTokenId);
-      await tx.wait();
-      setIsERC721Approved(true);
-      toast.success('ERC721 approval successful! You can now deposit the prize.');
+      const erc721 = getContractInstance(raffle.prizeCollection, 'erc721Prize');
+      if (!erc721) {
+        throw new Error('Failed to get ERC721 contract instance');
+      }
+      
+      const result = await executeTransaction(erc721.approve, raffle.address, raffle.prizeTokenId);
+      
+      if (result.success) {
+        setIsERC721Approved(true);
+        toast.success('ERC721 approval successful! You can now deposit the prize.');
+      } else {
+        throw new Error(result.error);
+      }
     } catch (e) {
       toast.error('ERC721 approval failed: ' + (e?.reason || e?.message || e));
     } finally {
@@ -1549,16 +1555,18 @@ const RaffleDetailPage = () => {
         throw new Error('Contract instance not available');
       }
 
-      const tx = await raffleContract.deleteRaffle();
-      await tx.wait();
+      const result = await executeTransaction(raffleContract.deleteRaffle);
       
-      // Show success message or redirect
-      toast.success('Raffle deleted successfully!');
+      if (result.success) {
+        toast.success('Raffle deleted successfully!');
         navigate('/');
-          } catch (error) {
-        console.error('Error deleting raffle:', error);
-        toast.error(formatErrorForToast(error));
-      } finally {
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      console.error('Error deleting raffle:', error);
+      toast.error(formatErrorForToast(error));
+    } finally {
       setDeletingRaffle(false);
     }
   };
@@ -1592,9 +1600,16 @@ const RaffleDetailPage = () => {
     setDepositingPrize(true);
     try {
       const contract = getContractInstance(raffleAddress, 'raffle');
-      const tx = await contract.depositEscrowPrize({ value: raffle.ethPrizeAmount || 0 });
-      await tx.wait();
-      toast.success('Prize deposited successfully!');
+      const result = await executeTransaction(
+        contract.depositEscrowPrize,
+        { value: raffle.ethPrizeAmount || 0 }
+      );
+      
+      if (result.success) {
+        toast.success('Prize deposited successfully!');
+      } else {
+        throw new Error(result.error);
+      }
     } catch (e) {
       toast.error('Deposit failed: ' + (e?.reason || e?.message || e));
     } finally {
@@ -1606,9 +1621,13 @@ const RaffleDetailPage = () => {
     setWithdrawingPrize(true);
     try {
       const contract = getContractInstance(raffleAddress, 'raffle');
-      const tx = await contract.withdrawEscrowedPrize();
-      await tx.wait();
-      toast.success('Prize withdrawn successfully!');
+      const result = await executeTransaction(contract.withdrawEscrowedPrize);
+      
+      if (result.success) {
+        toast.success('Prize withdrawn successfully!');
+      } else {
+        throw new Error(result.error);
+      }
     } catch (e) {
       toast.error('Withdraw failed: ' + (e?.reason || e?.message || e));
     } finally {

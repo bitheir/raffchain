@@ -92,7 +92,6 @@ export const ContractProvider = ({ children }) => {
       return { success: true, receipt, hash: tx.hash };
     } catch (error) {
       const message = formatErrorForToast(error);
-      toast.error(message);
       return { success: false, error: message };
     }
   };
@@ -104,7 +103,6 @@ export const ContractProvider = ({ children }) => {
       return { success: true, result };
     } catch (error) {
       const message = formatErrorForToast(error);
-      toast.error(message);
       return { success: false, error: message };
     }
   };

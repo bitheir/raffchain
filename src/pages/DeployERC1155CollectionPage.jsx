@@ -5,6 +5,11 @@ import { useContract } from '../contexts/ContractContext';
 import { ethers } from 'ethers';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { toast } from 'sonner';
+import { formatErrorForToast } from '../utils/errorUtils';
 import { PageContainer } from '../components/Layout';
 
 const DeployERC1155CollectionPage = () => {
@@ -38,7 +43,7 @@ const DeployERC1155CollectionPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.nftFactory) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
 
@@ -54,7 +59,7 @@ const DeployERC1155CollectionPage = () => {
       );
 
       if (result.success) {
-        alert('ERC1155 collection deployed successfully!');
+        toast.success('ERC1155 collection deployed successfully!');
         // Set the deployed collection address for minting
         setDeployedCollection(result.receipt.logs[0].address || '');
         setMintData(prev => ({ ...prev, collectionAddress: result.receipt.logs[0].address || '' }));
@@ -69,10 +74,10 @@ const DeployERC1155CollectionPage = () => {
       } else {
         throw new Error(result.error);
       }
-    } catch (error) {
-      console.error('Error deploying collection:', error);
-      alert('Error deploying collection: ' + error.message);
-    } finally {
+          } catch (error) {
+        console.error('Error deploying collection:', error);
+        toast.error(formatErrorForToast(error));
+      } finally {
       setLoading(false);
     }
   };
@@ -80,17 +85,17 @@ const DeployERC1155CollectionPage = () => {
   const handleMint = async (e) => {
     e.preventDefault();
     if (!connected || !mintData.collectionAddress) {
-      alert('Please connect your wallet and enter a valid collection address');
+      toast.error('Please connect your wallet and enter a valid collection address');
       return;
     }
 
     if (!ethers.utils.isAddress(mintData.collectionAddress)) {
-      alert('Please enter a valid collection address');
+      toast.error('Please enter a valid collection address');
       return;
     }
 
     if (!ethers.utils.isAddress(mintData.recipientAddress)) {
-      alert('Please enter a valid recipient address');
+      toast.error('Please enter a valid recipient address');
       return;
     }
 
@@ -119,7 +124,7 @@ const DeployERC1155CollectionPage = () => {
       );
 
       await tx.wait();
-      alert(`Successfully minted ${mintData.amount} tokens with ID ${mintData.tokenId} to ${mintData.recipientAddress}`);
+      toast.success(`Successfully minted ${mintData.amount} tokens with ID ${mintData.tokenId} to ${mintData.recipientAddress}`);
       
       // Reset mint form
       setMintData(prev => ({
@@ -128,10 +133,10 @@ const DeployERC1155CollectionPage = () => {
         amount: '',
         recipientAddress: ''
       }));
-    } catch (error) {
-      console.error('Error minting tokens:', error);
-      alert('Error minting tokens: ' + error.message);
-    } finally {
+          } catch (error) {
+        console.error('Error minting tokens:', error);
+        toast.error(formatErrorForToast(error));
+      } finally {
       setMintLoading(false);
     }
   };

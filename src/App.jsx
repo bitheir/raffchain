@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { WalletProvider } from './contexts/WalletContext';
 import { ContractProvider } from './contexts/ContractContext';
 import { Header } from './components/Layout';
+import { Toaster } from './components/ui/sonner';
 import LandingPage from './pages/LandingPage';
 import ProfilePage from './pages/ProfilePage';
 import CreateRafflePage from './pages/CreateRafflePage';
@@ -40,6 +41,7 @@ function App() {
                   <Route path="/raffles/:state" element={<RafflesByStatePage />} />
                 </Routes>
               </main>
+              <Toaster />
             </div>
           </Router>
         </ContractProvider>

@@ -1,7 +1,9 @@
-import React from 'react';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from './select';
+import React, { useState, useEffect } from 'react';
 import { useWallet } from '../../contexts/WalletContext';
 import { SUPPORTED_NETWORKS } from '../../networks';
+import { Button } from './button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
+import { toast } from 'sonner';
 
 // Safely extract a string from any error
 const getErrorMessage = (err) => {
@@ -44,7 +46,7 @@ const NetworkSelector = () => {
                 if (window.ethereum && window.ethereum.chainId) {
                   const currentChainId = parseInt(window.ethereum.chainId, 16);
                   if (currentChainId !== targetChainId) {
-                    alert('Failed to switch to the new network after adding: ' + getErrorMessage(switchErr));
+                    toast.error('Failed to switch to the new network after adding: ' + getErrorMessage(switchErr));
                   }
                 }
               }, 1000);
@@ -55,7 +57,7 @@ const NetworkSelector = () => {
             if (window.ethereum && window.ethereum.chainId) {
               const currentChainId = parseInt(window.ethereum.chainId, 16);
               if (currentChainId !== targetChainId) {
-                alert('Failed to add network: ' + getErrorMessage(addErr));
+                toast.error('Failed to add network: ' + getErrorMessage(addErr));
               }
             }
           }, 1000);
@@ -65,7 +67,7 @@ const NetworkSelector = () => {
           if (window.ethereum && window.ethereum.chainId) {
             const currentChainId = parseInt(window.ethereum.chainId, 16);
             if (currentChainId !== targetChainId) {
-              alert('Failed to switch network: ' + getErrorMessage(err));
+              toast.error('Failed to switch network: ' + getErrorMessage(err));
             }
           }
         }, 1000);

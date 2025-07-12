@@ -3,6 +3,12 @@ import { DollarSign, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
 import { useWallet } from '../contexts/WalletContext';
 import { useContract } from '../contexts/ContractContext';
 import { ethers } from 'ethers';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
+import { toast } from 'sonner';
+import { formatErrorForToast } from '../utils/errorUtils';
 
 const CreatorRevenueWithdrawalComponent = () => {
   const { connected, address } = useWallet();
@@ -24,7 +30,7 @@ const CreatorRevenueWithdrawalComponent = () => {
 
   const loadRaffleInfo = async (raffleAddress) => {
     if (!raffleAddress || !connected) {
-      alert('Please enter a raffle address and connect your wallet');
+      toast.error('Please enter a raffle address and connect your wallet');
       return;
     }
 
@@ -63,10 +69,10 @@ const CreatorRevenueWithdrawalComponent = () => {
         totalRevenue
       });
 
-    } catch (error) {
-      console.error('Error loading raffle info:', error);
-      alert('Error loading raffle info: ' + error.message);
-      setRaffleData({
+          } catch (error) {
+        console.error('Error loading raffle info:', error);
+        toast.error(formatErrorForToast(error));
+        setRaffleData({
         address: raffleAddress,
         revenueAmount: '0',
         isCreator: false,
@@ -95,24 +101,24 @@ const CreatorRevenueWithdrawalComponent = () => {
 
   const handleWithdrawRevenue = async () => {
     if (!connected || !raffleData.address) {
-      alert('Please connect your wallet and load raffle info first');
+      toast.error('Please connect your wallet and load raffle info first');
       return;
     }
 
     if (!raffleData.isCreator) {
-      alert('You are not the creator of this raffle');
+      toast.error('You are not the creator of this raffle');
       return;
     }
 
     if (parseFloat(raffleData.revenueAmount) <= 0) {
-      alert('No revenue available for withdrawal');
+      toast.info('No revenue available for withdrawal');
       return;
     }
 
     // Check if raffle is in a valid state for withdrawal
     const validStates = ['Completed', 'AllPrizesClaimed', 'Ended'];
     if (!validStates.includes(raffleData.raffleState)) {
-      alert(`Revenue can only be withdrawn from completed raffles. Current state: ${raffleData.raffleState}`);
+      toast.info(`Revenue can only be withdrawn from completed raffles. Current state: ${raffleData.raffleState}`);
       return;
     }
 
@@ -127,16 +133,16 @@ const CreatorRevenueWithdrawalComponent = () => {
       const result = await executeTransaction(contract.withdrawCreatorRevenue);
 
       if (result.success) {
-        alert(`Revenue withdrawn successfully! Transaction: ${result.hash}`);
+        toast.success(`Revenue withdrawn successfully! Transaction: ${result.hash}`);
         // Reload raffle info to show updated values
         await loadRaffleInfo(raffleData.address);
       } else {
         throw new Error(result.error);
       }
-    } catch (error) {
-      console.error('Error withdrawing revenue:', error);
-      alert('Error withdrawing revenue: ' + error.message);
-    } finally {
+          } catch (error) {
+        console.error('Error withdrawing revenue:', error);
+        toast.error(formatErrorForToast(error));
+      } finally {
       setLoading(false);
     }
   };

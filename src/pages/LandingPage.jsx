@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 import { Button } from '../components/ui/button';
 import { PageContainer } from '../components/Layout';
 import { categorizeRaffles } from '../utils/raffleUtils';
+import { toast } from 'sonner';
 
 const RAFFLE_STATE_LABELS = [
   'Pending',

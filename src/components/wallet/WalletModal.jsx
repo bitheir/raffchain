@@ -1,7 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
-import { Wallet, X } from 'lucide-react';
+import { Wallet, X, ChevronDown } from 'lucide-react';
 import { useWallet } from '../../contexts/WalletContext';
+import { Button } from '../ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { toast } from 'sonner';
+import { formatErrorForToast } from '../../utils/errorUtils';
 
 const WalletModal = ({ isOpen, onClose }) => {
   const { connectWallet, loading } = useWallet();
@@ -12,7 +16,7 @@ const WalletModal = ({ isOpen, onClose }) => {
       onClose();
     } catch (error) {
       console.error('Failed to connect wallet:', error);
-      alert('Failed to connect wallet: ' + error.message);
+      toast.error('Failed to connect wallet: ' + formatErrorForToast(error));
     }
   };
 

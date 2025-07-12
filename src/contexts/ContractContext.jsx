@@ -4,6 +4,7 @@ import { SUPPORTED_NETWORKS } from '../networks';
 import { useWallet } from './WalletContext';
 import { contractABIs } from '../contracts/contractABIs';
 import { toast } from "sonner";
+import { formatErrorForToast } from '../utils/errorUtils';
 
 const ContractContext = createContext();
 
@@ -90,7 +91,7 @@ export const ContractProvider = ({ children }) => {
       const receipt = await tx.wait();
       return { success: true, receipt, hash: tx.hash };
     } catch (error) {
-      let message = error?.reason || error?.data?.message || error?.message || 'Transaction failed';
+      const message = formatErrorForToast(error);
       toast.error(message);
       return { success: false, error: message };
     }
@@ -102,7 +103,7 @@ export const ContractProvider = ({ children }) => {
       const result = await contractMethod(...args);
       return { success: true, result };
     } catch (error) {
-      let message = error?.reason || error?.data?.message || error?.message || 'Contract call failed';
+      const message = formatErrorForToast(error);
       toast.error(message);
       return { success: false, error: message };
     }

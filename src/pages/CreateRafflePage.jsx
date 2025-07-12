@@ -7,10 +7,233 @@ import { Link } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Switch } from '../components/ui/switch';
 import { Label } from '../components/ui/label';
-import TokenPreApproval from '../components/TokenPreApproval';
+import { toast } from 'sonner';
+import { formatErrorForToast } from '../utils/errorUtils';
+import erc20Abi from '../contracts/erc20.min.abi.json';
+import erc721Abi from '../contracts/ERC721Prize.min.abi.json';
+import erc1155Abi from '../contracts/ERC1155Prize.min.abi.json';
+import { SUPPORTED_NETWORKS } from '../networks';
+
+// Utility function to check if tokens are already approved
+const checkTokenApproval = async (signer, tokenAddress, prizeType, raffleDeployerAddress, amount, tokenId) => {
+  try {
+    let contract;
+    const userAddress = await signer.getAddress();
+    
+    console.log('Checking token approval status:', {
+      userAddress,
+      tokenAddress,
+      prizeType,
+      raffleDeployerAddress,
+      amount,
+      tokenId
+    });
+    
+    if (prizeType === 'erc20') {
+      contract = new ethers.Contract(tokenAddress, erc20Abi, signer);
+      const allowance = await contract.allowance(userAddress, raffleDeployerAddress);
+      const requiredAmount = ethers.utils.parseUnits(amount, 18);
+      console.log('ERC20 approval check:', {
+        allowance: allowance.toString(),
+        requiredAmount: requiredAmount.toString(),
+        isApproved: allowance.gte(requiredAmount)
+      });
+      
+      // If allowance is 0, check recent approval events as a fallback
+      if (allowance.toString() === '0') {
+        console.log('Allowance is 0, checking recent approval events...');
+        try {
+          // Get the last 1000 blocks to look for approval events
+          const currentBlock = await signer.provider.getBlockNumber();
+          const fromBlock = Math.max(0, currentBlock - 1000);
+          
+          // Create the approval event filter manually since contract.filters might not work
+          const approvalEventSignature = '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
+          const userAddressPadded = '0x' + userAddress.slice(2).padStart(64, '0');
+          const spenderAddressPadded = '0x' + raffleDeployerAddress.slice(2).padStart(64, '0');
+          
+          const logs = await signer.provider.getLogs({
+            address: tokenAddress,
+            topics: [approvalEventSignature, userAddressPadded, spenderAddressPadded],
+            fromBlock: fromBlock,
+            toBlock: currentBlock
+          });
+          
+          console.log('Recent approval events:', logs);
+          
+          // Check if any recent approval events have sufficient allowance
+          for (const log of logs) {
+            const approvalAmount = ethers.BigNumber.from(log.data);
+            console.log('Found approval event with amount:', approvalAmount.toString());
+            if (approvalAmount.gte(requiredAmount)) {
+              console.log('Found recent approval event with sufficient allowance:', approvalAmount.toString());
+              return true;
+            }
+          }
+        } catch (error) {
+          console.error('Error checking approval events:', error);
+        }
+      }
+      
+      return allowance.gte(requiredAmount);
+    } else if (prizeType === 'erc721') {
+      contract = new ethers.Contract(tokenAddress, erc721Abi, signer);
+      const approved = await contract.getApproved(tokenId);
+      const isApproved = approved.toLowerCase() === raffleDeployerAddress.toLowerCase();
+      console.log('ERC721 approval check:', {
+        approved,
+        raffleDeployerAddress,
+        isApproved
+      });
+      return isApproved;
+    } else if (prizeType === 'erc1155') {
+      contract = new ethers.Contract(tokenAddress, erc1155Abi, signer);
+      const isApproved = await contract.isApprovedForAll(userAddress, raffleDeployerAddress);
+      console.log('ERC1155 approval check:', {
+        userAddress,
+        raffleDeployerAddress,
+        isApproved
+      });
+      return isApproved;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Error checking token approval:', error);
+    return false;
+  }
+};
+
+// Utility function for token approval
+const approveToken = async (signer, tokenAddress, prizeType, raffleDeployerAddress, amount, tokenId) => {
+  try {
+    let contract, tx;
+    
+    console.log('Approval details:', {
+      tokenAddress,
+      prizeType,
+      raffleDeployerAddress,
+      amount,
+      tokenId
+    });
+    
+    // Check if already approved
+    const isAlreadyApproved = await checkTokenApproval(signer, tokenAddress, prizeType, raffleDeployerAddress, amount, tokenId);
+    
+    console.log('Approval check result:', {
+      isAlreadyApproved,
+      prizeType,
+      tokenAddress,
+      raffleDeployerAddress
+    });
+    
+    if (isAlreadyApproved) {
+      console.log('Token is already approved, skipping approval transaction');
+      return { success: true, alreadyApproved: true };
+    }
+    
+    console.log('Token not approved, proceeding with approval transaction...');
+    
+    if (prizeType === 'erc20') {
+      if (!amount || isNaN(amount) || Number(amount) <= 0) {
+        throw new Error('Enter a valid amount');
+      }
+      contract = new ethers.Contract(tokenAddress, erc20Abi, signer);
+      const approvalAmount = ethers.utils.parseUnits(amount, 18);
+      console.log('ERC20 approval amount:', approvalAmount.toString());
+      
+      // Test the contract functions
+      try {
+        const testAllowance = await contract.allowance(await signer.getAddress(), raffleDeployerAddress);
+        console.log('Test allowance before approval:', testAllowance.toString());
+      } catch (error) {
+        console.error('Error testing allowance function:', error);
+      }
+      
+      tx = await contract.approve(raffleDeployerAddress, approvalAmount);
+    } else if (prizeType === 'erc721') {
+      if (!tokenId || isNaN(tokenId) || Number(tokenId) < 0) {
+        throw new Error('Enter a valid token ID');
+      }
+      contract = new ethers.Contract(tokenAddress, erc721Abi, signer);
+      console.log('ERC721 approval for token ID:', tokenId);
+      tx = await contract.approve(raffleDeployerAddress, tokenId);
+    } else if (prizeType === 'erc1155') {
+      contract = new ethers.Contract(tokenAddress, erc1155Abi, signer);
+      console.log('ERC1155 setApprovalForAll for address:', raffleDeployerAddress);
+      tx = await contract.setApprovalForAll(raffleDeployerAddress, true);
+    }
+    
+    console.log('Approval transaction submitted:', tx.hash);
+    console.log('Waiting for approval transaction confirmation...');
+    
+    // Wait for the transaction to be mined
+    const receipt = await tx.wait();
+    console.log('Approval transaction confirmed:', receipt.transactionHash);
+    console.log('Approval transaction receipt:', receipt);
+    
+    // Check if the transaction was successful
+    if (receipt.status === 0) {
+      console.error('Approval transaction failed!');
+      throw new Error('Approval transaction failed');
+    }
+    
+    // Check for approval events in the transaction logs
+    console.log('Checking transaction logs for approval events...');
+    if (receipt.logs && receipt.logs.length > 0) {
+      console.log('Transaction logs:', receipt.logs);
+    }
+    
+    // Try to get the approval event directly
+    try {
+      const approvalEvent = receipt.logs?.find(log => {
+        // Look for Approval event signature
+        return log.topics && log.topics[0] === '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
+      });
+      if (approvalEvent) {
+        console.log('Found approval event:', approvalEvent);
+      }
+    } catch (error) {
+      console.error('Error parsing approval event:', error);
+    }
+    
+    // Verify the approval was successful by checking again
+    console.log('Verifying approval was successful...');
+    
+    // For ERC20, check the approval event in the transaction receipt
+    if (prizeType === 'erc20') {
+      const approvalEvent = receipt.logs?.find(log => {
+        return log.topics && log.topics[0] === '0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925';
+      });
+      
+      if (approvalEvent) {
+        const approvalAmount = ethers.BigNumber.from(approvalEvent.data);
+        const requiredAmount = ethers.utils.parseUnits(amount, 18);
+        const isApproved = approvalAmount.gte(requiredAmount);
+        console.log('Approval verification from event:', {
+          approvalAmount: approvalAmount.toString(),
+          requiredAmount: requiredAmount.toString(),
+          isApproved
+        });
+        return { success: true, receipt, alreadyApproved: false };
+      }
+    }
+    
+    const verificationResult = await checkTokenApproval(signer, tokenAddress, prizeType, raffleDeployerAddress, amount, tokenId);
+    console.log('Approval verification result:', verificationResult);
+    
+    // Add a small delay to ensure the blockchain state is updated
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    return { success: true, receipt };
+  } catch (error) {
+    console.error('Approval error:', error);
+    return { success: false, error: error.message };
+  }
+};
 
 function ERC1155DropForm() {
-  const { connected, address } = useWallet();
+  const { connected, address, signer } = useWallet();
   const { contracts, executeTransaction } = useContract();
   const [loading, setLoading] = useState(false);
   const [socialTasks, setSocialTasks] = useState([]);
@@ -38,12 +261,45 @@ function ERC1155DropForm() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+    if (!connected || !contracts.raffleDeployer || !signer) {
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
     try {
+      // Get raffleDeployer address
+      const chainId = await signer.provider.getNetwork().then(net => net.chainId);
+      const networkConfig = SUPPORTED_NETWORKS[chainId];
+      const raffleDeployerAddress = networkConfig?.contractAddresses?.raffleDeployer;
+      
+      if (!raffleDeployerAddress) {
+        throw new Error('RaffleDeployer address not found for current network');
+      }
+
+      // Step 1: Approve token
+      console.log('Starting token approval for ERC1155...');
+      const approvalResult = await approveToken(
+        signer,
+        formData.collectionAddress,
+        'erc1155',
+        raffleDeployerAddress,
+        null,
+        null
+      );
+      
+      if (!approvalResult.success) {
+        throw new Error('Token approval failed: ' + approvalResult.error);
+      }
+      
+      if (approvalResult.alreadyApproved) {
+        console.log('Token was already approved, proceeding to create raffle...');
+      } else {
+        console.log('Token approval successful, creating raffle...');
+        // Add additional delay to ensure approval is fully processed
+        console.log('Waiting additional time for approval to be fully processed...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      // Step 2: Create raffle
       const startTime = Math.floor(new Date(formData.startTime).getTime() / 1000);
       const duration = parseInt(formData.duration) * 60;
       const ticketPrice = formData.ticketPrice ? ethers.utils.parseEther(formData.ticketPrice) : 0;
@@ -102,7 +358,7 @@ function ERC1155DropForm() {
         ]
       );
       if (result.success) {
-        alert('ERC1155 Collection raffle created successfully!');
+        toast.success('ERC1155 Collection raffle created successfully!');
         setFormData({
           name: '',
           collectionAddress: '',
@@ -120,7 +376,7 @@ function ERC1155DropForm() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -266,7 +522,7 @@ function ERC1155DropForm() {
             disabled={loading || !connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base h-12"
           >
-            {loading ? 'Creating...' : 'Create Raffle'}
+            {loading ? 'Approving & Creating...' : 'Approve Prize & Create Raffle'}
           </Button>
         </div>
       </form>
@@ -314,7 +570,7 @@ const PrizedRaffleForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
 
@@ -410,7 +666,7 @@ const PrizedRaffleForm = () => {
           }
         }
 
-        alert('Prized raffle created successfully!');
+        toast.success('Prized raffle created successfully!');
         setFormData({
           name: '',
           startTime: '',
@@ -438,7 +694,7 @@ const PrizedRaffleForm = () => {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -767,7 +1023,7 @@ const NonPrizedRaffleForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
 
@@ -799,7 +1055,7 @@ const NonPrizedRaffleForm = () => {
       );
 
       if (result.success) {
-        alert('Non-prized raffle created successfully!');
+        toast.success('Non-prized raffle created successfully!');
         // Reset form
         setFormData({
           name: '',
@@ -814,7 +1070,7 @@ const NonPrizedRaffleForm = () => {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -955,7 +1211,7 @@ const WhitelistRaffleForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
@@ -998,7 +1254,7 @@ const WhitelistRaffleForm = () => {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('Whitelist raffle created successfully!');
+        toast.success('Whitelist raffle created successfully!');
         setFormData({
           name: '',
           startTime: '',
@@ -1012,7 +1268,7 @@ const WhitelistRaffleForm = () => {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -1153,7 +1409,7 @@ const NewERC721DropForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
@@ -1200,7 +1456,7 @@ const NewERC721DropForm = () => {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('New ERC721 Collection raffle created successfully!');
+        toast.success('New ERC721 Collection raffle created successfully!');
         setFormData({
           name: '',
           startTime: '',
@@ -1220,7 +1476,7 @@ const NewERC721DropForm = () => {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -1435,7 +1691,7 @@ function ExistingERC721DropForm() {
     e.preventDefault();
     if (!validate()) return;
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
@@ -1477,7 +1733,7 @@ function ExistingERC721DropForm() {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('Existing ERC721 Collection raffle created successfully!');
+        toast.success('Existing ERC721 Collection raffle created successfully!');
         setFormData({
           name: '',
           collection: '',
@@ -1493,7 +1749,7 @@ function ExistingERC721DropForm() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -1791,15 +2047,7 @@ const CreateRafflePage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 max-w-7xl mx-auto mt-16">
           <div className="lg:col-span-1 flex flex-col items-start gap-6" style={{ minWidth: '24rem', maxWidth: '24rem' }}>
             {renderFilterCard()}
-            {/* Token Pre-Approval logic */}
-            {(
-              (raffleType === 'NFTDrop' && nftStandard === 'ERC1155') ||
-              (raffleType === 'Lucky Sale/NFT Giveaway' && nftStandard === 'ERC721') ||
-              (raffleType === 'Lucky Sale/NFT Giveaway' && nftStandard === 'ERC1155') ||
-              (raffleType === 'ERC20 Token Giveaway')
-            ) && (
-              <TokenPreApproval raffleDeployerAddress={getRaffleDeployerAddress()} />
-            )}
+
             {raffleType === 'NFTDrop' && nftStandard === 'ERC1155' && (
               <Link
                 to="/deploy-erc1155-collection"
@@ -1821,7 +2069,7 @@ const CreateRafflePage = () => {
 
 // Add LuckySaleERC721Form
 function LuckySaleERC721Form() {
-  const { connected, address } = useWallet();
+  const { connected, address, signer } = useWallet();
   const { contracts, executeTransaction } = useContract();
   const [loading, setLoading] = useState(false);
   const [socialTasks, setSocialTasks] = useState([]);
@@ -1848,12 +2096,45 @@ function LuckySaleERC721Form() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+    if (!connected || !contracts.raffleDeployer || !signer) {
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
     try {
+      // Get raffleDeployer address
+      const chainId = await signer.provider.getNetwork().then(net => net.chainId);
+      const networkConfig = SUPPORTED_NETWORKS[chainId];
+      const raffleDeployerAddress = networkConfig?.contractAddresses?.raffleDeployer;
+      
+      if (!raffleDeployerAddress) {
+        throw new Error('RaffleDeployer address not found for current network');
+      }
+
+      // Step 1: Approve token
+      console.log('Starting token approval for ERC721...');
+      const approvalResult = await approveToken(
+        signer,
+        formData.collectionAddress,
+        'erc721',
+        raffleDeployerAddress,
+        null,
+        formData.tokenId
+      );
+      
+      if (!approvalResult.success) {
+        throw new Error('Token approval failed: ' + approvalResult.error);
+      }
+      
+      if (approvalResult.alreadyApproved) {
+        console.log('Token was already approved, proceeding to create raffle...');
+      } else {
+        console.log('Token approval successful, creating raffle...');
+        // Add additional delay to ensure approval is fully processed
+        console.log('Waiting additional time for approval to be fully processed...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      // Step 2: Create raffle
       const startTime = Math.floor(new Date(formData.startTime).getTime() / 1000);
       const duration = parseInt(formData.duration) * 60;
       const ticketPrice = formData.ticketPrice ? ethers.utils.parseEther(formData.ticketPrice) : 0;
@@ -1891,7 +2172,7 @@ function LuckySaleERC721Form() {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('Lucky Sale ERC721 raffle created successfully!');
+        toast.success('Lucky Sale ERC721 raffle created successfully!');
         setFormData({
           name: '',
           collectionAddress: '',
@@ -1908,7 +2189,7 @@ function LuckySaleERC721Form() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -2043,7 +2324,7 @@ function LuckySaleERC721Form() {
             disabled={loading || !connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base h-12"
           >
-            {loading ? 'Creating...' : 'Create Raffle'}
+            {loading ? 'Approving & Creating...' : 'Approve Prize & Create Raffle'}
           </Button>
         </div>
       </form>
@@ -2053,7 +2334,7 @@ function LuckySaleERC721Form() {
 
 // Add LuckySaleERC1155Form (like ERC1155DropForm but no deploy button)
 function LuckySaleERC1155Form() {
-  const { connected, address } = useWallet();
+  const { connected, address, signer } = useWallet();
   const { contracts, executeTransaction } = useContract();
   const [loading, setLoading] = useState(false);
   const [socialTasks, setSocialTasks] = useState([]);
@@ -2081,12 +2362,45 @@ function LuckySaleERC1155Form() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+    if (!connected || !contracts.raffleDeployer || !signer) {
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
     try {
+      // Get raffleDeployer address
+      const chainId = await signer.provider.getNetwork().then(net => net.chainId);
+      const networkConfig = SUPPORTED_NETWORKS[chainId];
+      const raffleDeployerAddress = networkConfig?.contractAddresses?.raffleDeployer;
+      
+      if (!raffleDeployerAddress) {
+        throw new Error('RaffleDeployer address not found for current network');
+      }
+
+      // Step 1: Approve token
+      console.log('Starting token approval for ERC1155...');
+      const approvalResult = await approveToken(
+        signer,
+        formData.collectionAddress,
+        'erc1155',
+        raffleDeployerAddress,
+        null,
+        null
+      );
+      
+      if (!approvalResult.success) {
+        throw new Error('Token approval failed: ' + approvalResult.error);
+      }
+      
+      if (approvalResult.alreadyApproved) {
+        console.log('Token was already approved, proceeding to create raffle...');
+      } else {
+        console.log('Token approval successful, creating raffle...');
+        // Add additional delay to ensure approval is fully processed
+        console.log('Waiting additional time for approval to be fully processed...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+      // Step 2: Create raffle
       const startTime = Math.floor(new Date(formData.startTime).getTime() / 1000);
       const duration = parseInt(formData.duration) * 60;
       const ticketPrice = formData.ticketPrice ? ethers.utils.parseEther(formData.ticketPrice) : 0;
@@ -2125,7 +2439,7 @@ function LuckySaleERC1155Form() {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('Lucky Sale ERC1155 raffle created successfully!');
+        toast.success('Lucky Sale ERC1155 raffle created successfully!');
         setFormData({
           name: '',
           collectionAddress: '',
@@ -2143,7 +2457,7 @@ function LuckySaleERC1155Form() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -2292,7 +2606,7 @@ function LuckySaleERC1155Form() {
             disabled={loading || !connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base h-12"
           >
-            {loading ? 'Creating...' : 'Create Raffle'}
+            {loading ? 'Approving & Creating...' : 'Approve Prize & Create Raffle'}
           </Button>
         </div>
       </form>
@@ -2328,7 +2642,7 @@ function ETHGiveawayForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
@@ -2370,7 +2684,7 @@ function ETHGiveawayForm() {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('ETH Giveaway raffle created successfully!');
+        toast.success('ETH Giveaway raffle created successfully!');
         setFormData({
           name: '',
           ethAmount: '',
@@ -2386,7 +2700,7 @@ function ETHGiveawayForm() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -2499,7 +2813,7 @@ function ETHGiveawayForm() {
             disabled={loading || !connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base h-12"
           >
-            {loading ? 'Creating...' : 'Create Raffle'}
+            {loading ? 'Approving & Creating...' : 'Approve & Create Raffle'}
           </Button>
         </div>
       </form>
@@ -2509,7 +2823,7 @@ function ETHGiveawayForm() {
 
 // Add ERC20GiveawayForm
 function ERC20GiveawayForm() {
-  const { connected, address } = useWallet();
+  const { connected, address, signer } = useWallet();
   const { contracts, executeTransaction } = useContract();
   const [loading, setLoading] = useState(false);
   const [socialTasks, setSocialTasks] = useState([]);
@@ -2535,12 +2849,41 @@ function ERC20GiveawayForm() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!connected || !contracts.raffleDeployer) {
-      alert('Please connect your wallet and ensure contracts are configured');
+    if (!connected || !contracts.raffleDeployer || !signer) {
+      toast.error('Please connect your wallet and ensure contracts are configured');
       return;
     }
     setLoading(true);
     try {
+      // Get raffleDeployer address
+      const chainId = await signer.provider.getNetwork().then(net => net.chainId);
+      const networkConfig = SUPPORTED_NETWORKS[chainId];
+      const raffleDeployerAddress = networkConfig?.contractAddresses?.raffleDeployer;
+      
+      if (!raffleDeployerAddress) {
+        throw new Error('RaffleDeployer address not found for current network');
+      }
+
+      // Step 1: Approve token
+      console.log('Starting token approval for ERC20...');
+      const approvalResult = await approveToken(
+        signer,
+        formData.tokenAddress,
+        'erc20',
+        raffleDeployerAddress,
+        formData.tokenAmount,
+        null
+      );
+      
+      if (!approvalResult.success) {
+        throw new Error('Token approval failed: ' + approvalResult.error);
+      }
+      
+      console.log('Token approval successful, creating raffle...');
+      // Add additional delay to ensure approval is fully processed
+      console.log('Waiting additional time for approval to be fully processed...');
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Step 2: Create raffle
       const startTime = Math.floor(new Date(formData.startTime).getTime() / 1000);
       const duration = parseInt(formData.duration) * 60;
       const tokenAmount = formData.tokenAmount ? ethers.utils.parseUnits(formData.tokenAmount, 18) : ethers.BigNumber.from(0); // default 18 decimals
@@ -2578,7 +2921,7 @@ function ERC20GiveawayForm() {
         result = { success: false, error: error.message };
       }
       if (result.success) {
-        alert('ERC20 Giveaway raffle created successfully!');
+        toast.success('ERC20 Giveaway raffle created successfully!');
         setFormData({
           name: '',
           tokenAddress: '',
@@ -2595,7 +2938,7 @@ function ERC20GiveawayForm() {
       }
     } catch (error) {
       console.error('Error creating raffle:', error);
-      alert('Error creating raffle: ' + error.message);
+      toast.error(formatErrorForToast(error));
     } finally {
       setLoading(false);
     }
@@ -2719,7 +3062,7 @@ function ERC20GiveawayForm() {
             disabled={loading || !connected}
             className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base h-12"
           >
-            {loading ? 'Creating...' : 'Create Raffle'}
+            {loading ? 'Approving & Creating...' : 'Approve Prize & Create Raffle'}
           </Button>
         </div>
       </form>

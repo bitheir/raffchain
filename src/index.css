@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Sonner toast styles */
+[data-sonner-toaster] {
+  z-index: 9999;
+}
+
+[data-sonner-toast] {
+  z-index: 9999;
+}
+
 @layer base {
   body {
     @apply bg-background text-foreground;

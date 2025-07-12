@@ -372,8 +372,8 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
   };
 
   const canPurchaseTickets = () => {
-    // Can only purchase tickets if raffle is active AND tasks are completed
-    return raffle.state?.toLowerCase() === 'active' && tasksCompleted;
+    // Can only purchase tickets if raffle is active
+    return raffle.state?.toLowerCase() === 'active';
   };
 
   const isRaffleEnded = () => {

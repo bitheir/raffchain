@@ -74,10 +74,10 @@ const DeployERC1155CollectionPage = () => {
       } else {
         throw new Error(result.error);
       }
-          } catch (error) {
-        console.error('Error deploying collection:', error);
+    } catch (error) {
+      console.error('Error deploying collection:', error);
         toast.error(formatErrorForToast(error));
-      } finally {
+    } finally {
       setLoading(false);
     }
   };
@@ -133,10 +133,10 @@ const DeployERC1155CollectionPage = () => {
         amount: '',
         recipientAddress: ''
       }));
-          } catch (error) {
-        console.error('Error minting tokens:', error);
+    } catch (error) {
+      console.error('Error minting tokens:', error);
         toast.error(formatErrorForToast(error));
-      } finally {
+    } finally {
       setMintLoading(false);
     }
   };

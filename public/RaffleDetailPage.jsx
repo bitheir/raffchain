@@ -1,17 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Ticket, Clock, Trophy, Users, ArrowLeft, AlertCircle, CheckCircle, DollarSign, Trash2, Info } from 'lucide-react';
 import { useWallet } from '../contexts/WalletContext';
 import { useContract } from '../contexts/ContractContext';
 import { ethers } from 'ethers';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { PageContainer } from '../components/Layout';
+import SocialTaskCompletion from '../components/SocialTaskCompletion';
+import { SocialTaskService } from '../lib/socialTaskService';
 import { contractABIs } from '../contracts/contractABIs';
-import { Badge } from '../components/ui/badge';
-import { Progress } from '../components/ui/progress';
-import { toast } from 'sonner';
-import { formatErrorForToast } from '../utils/errorUtils';
+import { toast } from '../components/ui/sonner';
 
 const RAFFLE_STATE_LABELS = [
   'Pending',
@@ -25,11 +24,24 @@ const RAFFLE_STATE_LABELS = [
   'Unengaged'
 ];
 
-const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
+// Utility to extract only the revert reason from contract errors
+function extractRevertReason(error) {
+  if (error?.reason) return error.reason;
+  if (error?.data?.message) return error.data.message;
+  const msg = error?.message || error?.data?.message || error?.toString() || '';
+  const match = msg.match(/execution reverted:?\s*([^\n]*)/i);
+  if (match && match[1]) return match[1].trim();
+  return msg;
+}
+
+const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining, winners, shouldShowClaimPrize, prizeAlreadyClaimed, claimingPrize, handleClaimPrize, shouldShowClaimRefund, claimingRefund, handleClaimRefund, refundableAmount, isMintableERC721, showMintInput, setShowMintInput, mintWinnerAddress, setMintWinnerAddress, mintingToWinner, handleMintToWinner }) => {
   const { connected, address } = useWallet();
   const { getContractInstance, executeTransaction } = useContract();
   const [quantity, setQuantity] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [socialTasks, setSocialTasks] = useState([]);
+  const [tasksCompleted, setTasksCompleted] = useState(false);
+  const [loadingTasks, setLoadingTasks] = useState(true);
   const [requestingRandomness, setRequestingRandomness] = useState(false);
   const [userTickets, setUserTickets] = useState(0);
   // In TicketPurchaseSection, add state for winning chance
@@ -38,21 +50,12 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
   const [activating, setActivating] = useState(false);
   // 1. Add usesCustomPrice state to TicketPurchaseSection
   const [usesCustomPrice, setUsesCustomPrice] = useState(null);
-  // Add state for ending the raffle
+  // Add state for ending raffle
   const [endingRaffle, setEndingRaffle] = useState(false);
-  
-  // Add state for claim prize and refund functionality
-  const [claimingPrize, setClaimingPrize] = useState(false);
-  const [claimingRefund, setClaimingRefund] = useState(false);
-  const [winners, setWinners] = useState([]);
-  const [isWinner, setIsWinner] = useState(false);
-  const [eligibleForRefund, setEligibleForRefund] = useState(false);
-  const [refundClaimed, setRefundClaimed] = useState(false);
-  const [refundableAmount, setRefundableAmount] = useState(null);
 
   useEffect(() => {
+    loadSocialTasks();
     fetchUserTickets();
-    fetchWinners();
   }, [raffle.address, address]);
 
   // 2. In useEffect, after fetching raffle data, fetch usesCustomPrice
@@ -70,6 +73,37 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
     }
     fetchUsesCustomPrice();
   }, [raffle.address, getContractInstance]);
+
+  const loadSocialTasks = async () => {
+    if (!raffle.address) return;
+    
+    setLoadingTasks(true);
+    try {
+      const result = await SocialTaskService.getRaffleTasks(raffle.address);
+      if (result.success) {
+        setSocialTasks(result.data);
+        
+        // Check if user has completed all required tasks
+        if (result.data.length > 0) {
+          const completionResult = await SocialTaskService.checkUserTaskCompletion(
+            connected ? window.ethereum.selectedAddress : null,
+            raffle.address
+          );
+          
+          if (completionResult.success) {
+            setTasksCompleted(completionResult.data.completed);
+          }
+        } else {
+          setTasksCompleted(true); // No tasks required
+        }
+      }
+    } catch (error) {
+      console.error('Error loading social tasks:', error);
+      setTasksCompleted(true); // Allow purchase if tasks can't be loaded
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
 
   // Update fetchUserTickets to also fetch participants.length and calculate winning chance
   const fetchUserTickets = async () => {
@@ -113,208 +147,8 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
     }
   };
 
-  // Add fetchWinners function
-  const fetchWinners = async () => {
-    if (raffle.stateNum !== 4 && raffle.stateNum !== 7) {
-      setWinners([]);
-      setIsWinner(false);
-      setEligibleForRefund(false);
-      setRefundClaimed(false);
-      setRefundableAmount(null);
-      return;
-    }
-    
-    try {
-      const raffleContract = getContractInstance && getContractInstance(raffle.address, 'raffle');
-      if (!raffleContract) {
-        setWinners([]);
-        return;
-      }
-      
-      // Fetch winnersCount
-      const winnersCount = await raffleContract.winnersCount();
-      const count = winnersCount.toNumber ? winnersCount.toNumber() : Number(winnersCount);
-      
-      // Only proceed if there are winners
-      if (count === 0) {
-        setWinners([]);
-        return;
-      }
-      
-      // Fetch each winner by index
-      const winnersArray = [];
-      for (let i = 0; i < count; i++) {
-        try {
-          const winnerAddress = await raffleContract.winners(i);
-          
-          // Skip if the address is zero (no winner at this index)
-          if (winnerAddress === ethers.constants.AddressZero || winnerAddress === '0x0000000000000000000000000000000000000000') {
-            continue;
-          }
-          
-          const claimedWins = await raffleContract.claimedWins(winnerAddress);
-          const prizeClaimed = await raffleContract.prizeClaimed(winnerAddress);
-          
-          winnersArray.push({
-            address: winnerAddress,
-            index: i,
-            claimedWins: claimedWins.toNumber ? claimedWins.toNumber() : Number(claimedWins),
-            prizeClaimed: prizeClaimed
-          });
-        } catch (error) {
-          console.warn(`Error fetching winner at index ${i}:`, error);
-          continue;
-        }
-      }
-      
-      setWinners(winnersArray);
-      
-      // Check if connected user is a winner
-      const winner = winnersArray.find(w => w.address.toLowerCase() === address?.toLowerCase());
-      setIsWinner(!!winner);
-      
-      // Fetch refundable amount using getRefundableAmount
-      if (address && raffle.isPrized) {
-        try {
-          const refundable = await raffleContract.getRefundableAmount(address);
-          setRefundableAmount(refundable);
-          setEligibleForRefund(refundable && refundable.gt && refundable.gt(0));
-        } catch (e) {
-          setRefundableAmount(null);
-          setEligibleForRefund(false);
-        }
-      } else {
-        setEligibleForRefund(false);
-      }
-    } catch (error) {
-      setWinners([]);
-      setIsWinner(false);
-      setEligibleForRefund(false);
-      setRefundClaimed(false);
-      setRefundableAmount(null);
-    }
-  };
-
-  // Add claim prize function
-  const handleClaimPrize = async () => {
-    if (!address || !raffle || !getContractInstance) {
-      toast.error('Please connect your wallet to claim your prize');
-      return;
-    }
-
-    // Check if user is a winner
-    const isWinner = winners.some(winner => 
-      winner.address.toLowerCase() === address.toLowerCase()
-    );
-
-    if (!isWinner) {
-      toast.error('You are not a winner of this raffle');
-      return;
-    }
-
-    // Check if prize is already claimed
-    const winner = winners.find(w => 
-      w.address.toLowerCase() === address.toLowerCase()
-    );
-
-    if (winner && winner.prizeClaimed) {
-      toast.error('You have already claimed your prize');
-      return;
-    }
-
-    setClaimingPrize(true);
-    try {
-      const raffleContract = getContractInstance(raffle.address, 'raffle');
-      if (!raffleContract) {
-        throw new Error('Failed to get raffle contract');
-      }
-
-      // Call claimPrize function
-      const result = await executeTransaction(
-        raffleContract.claimPrize
-      );
-
-      if (result.success) {
-        // Determine prize type for success message
-        let prizeType = 'prize';
-        if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
-          prizeType = `${ethers.utils.formatEther(raffle.ethPrizeAmount)} ETH`;
-        } else if (raffle.erc20PrizeToken && raffle.erc20PrizeToken !== ethers.constants.AddressZero && raffle.erc20PrizeAmount && raffle.erc20PrizeAmount.gt && raffle.erc20PrizeAmount.gt(0)) {
-          prizeType = `${ethers.utils.formatUnits(raffle.erc20PrizeAmount, 18)} ERC20 tokens`;
-        } else if (raffle.prizeCollection && raffle.prizeCollection !== ethers.constants.AddressZero) {
-          prizeType = raffle.standard === 0 ? 'ERC721 NFT' : 'ERC1155 NFT';
-        }
-
-        toast.success(`Successfully claimed your ${prizeType}!`);
-        // Refresh the page to update the UI
-        window.location.reload();
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (error) {
-      console.error('Error claiming prize:', error);
-      toast.error(formatErrorForToast(error));
-    } finally {
-      setClaimingPrize(false);
-    }
-  };
-
-  // Add claim refund function
-  const handleClaimRefund = async () => {
-    if (!address || !raffle || !getContractInstance) {
-      toast.error('Please connect your wallet to claim your refund');
-      return;
-    }
-    setClaimingRefund(true);
-    try {
-      const raffleContract = getContractInstance(raffle.address, 'raffle');
-      if (!raffleContract) {
-        throw new Error('Failed to get raffle contract');
-      }
-      const result = await executeTransaction(raffleContract.claimRefund);
-      if (result.success) {
-        toast.success('Successfully claimed your refund!');
-        window.location.reload();
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (error) {
-      console.error('Error claiming refund:', error);
-      toast.error(formatErrorForToast(error));
-    } finally {
-      setClaimingRefund(false);
-    }
-  };
-
-  // Add canClaimPrize function
-  const canClaimPrize = () => {
-    // Can only claim if:
-    // 1. User is connected
-    // 2. Raffle is completed
-    // 3. Raffle has prizes (not whitelist)
-    // 4. User is a winner
-    // 5. User hasn't claimed yet
-    if (!address || !raffle.isPrized) return false;
-    
-    if (raffle.stateNum !== 4 && raffle.stateNum !== 7) return false;
-    
-    const winner = winners.find(w => 
-      w.address.toLowerCase() === address.toLowerCase()
-    );
-    
-    return winner && !winner.prizeClaimed;
-  };
-
-  // Add canClaimRefund function
-  const canClaimRefund = () => {
-    // Only for completed raffles, prized raffles, not whitelist, user is eligible, and not already claimed
-    return (
-      raffle.isPrized &&
-      (raffle.stateNum === 4 || raffle.stateNum === 7) &&
-      eligibleForRefund &&
-      !refundClaimed &&
-      refundableAmount && refundableAmount.gt && refundableAmount.gt(0)
-    );
+  const handleTasksCompleted = (completed) => {
+    setTasksCompleted(completed);
   };
 
   const handlePurchase = async () => {
@@ -323,12 +157,17 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
       return;
     }
 
+    if (!tasksCompleted) {
+      toast.error('Please complete all required social media tasks before purchasing tickets');
+      return;
+    }
+
     setLoading(true);
     try {
       await onPurchase(quantity);
     } catch (error) {
       console.error('Purchase failed:', error);
-      toast.error(formatErrorForToast(error));
+      toast.error(extractRevertReason(error));
     } finally {
       setLoading(false);
     }
@@ -346,7 +185,7 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
         throw new Error(result.error);
       }
     } catch (err) {
-      toast.error('Activate Raffle failed: ' + err.message);
+      toast.error(extractRevertReason(err));
     } finally {
       setActivating(false);
     }
@@ -365,22 +204,48 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
         throw new Error(result.error);
       }
     } catch (error) {
-        toast.error(formatErrorForToast(error));
+      toast.error(extractRevertReason(error));
     } finally {
       setRequestingRandomness(false);
     }
   };
 
+  const handleEndRaffle = async () => {
+    setEndingRaffle(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) throw new Error('Failed to get raffle contract');
+      const result = await executeTransaction(raffleContract.endRaffle);
+      if (result.success) {
+        toast.success('Raffle ended successfully!');
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (err) {
+      toast.error(extractRevertReason(err));
+    } finally {
+      setEndingRaffle(false);
+    }
+  };
+
   const canPurchaseTickets = () => {
-    // Can only purchase tickets if raffle is active
-    return raffle.state?.toLowerCase() === 'active';
+    // Can only purchase tickets if raffle is active AND tasks are completed
+    return raffle.state?.toLowerCase() === 'active' && tasksCompleted;
   };
 
   const isRaffleEnded = () => {
-    // Raffle is ended if state is ended/completed/drawing or timer shows "Ended"
-    return raffle.state === 'ended' || 
-           raffle.state === 'completed' || 
-           raffle.state === 'drawing' || 
+    const now = Math.floor(Date.now() / 1000);
+    const raffleEndTime = raffle.startTime + raffle.duration;
+    
+    // Raffle is ended if:
+    // 1. Raffle is in 'Active' state AND current time has passed the raffle's end time, OR
+    // 2. Contract state is Ended/Completed/Drawing, OR
+    // 3. Timer shows "Ended"
+    return (raffle.state === 'Active' && now >= raffleEndTime) ||
+           raffle.state === 'Ended' || 
+           raffle.state === 'Completed' || 
+           raffle.state === 'Drawing' || 
            timeRemaining === 'Ended';
   };
 
@@ -398,32 +263,6 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
   const now = Math.floor(Date.now() / 1000);
   const canActivate = raffle && raffle.startTime ? now >= raffle.startTime : false;
 
-  // Helper to check if raffle duration has ended
-  const hasRaffleEndedByTime = () => {
-    const now = Math.floor(Date.now() / 1000);
-    return (raffle.startTime + raffle.duration) <= now && raffle.stateNum === 1; // Only allow if still active
-  };
-
-  // Handler for ending the raffle
-  const handleEndRaffle = async () => {
-    setEndingRaffle(true);
-    try {
-      const raffleContract = getContractInstance(raffle.address, 'raffle');
-      if (!raffleContract) throw new Error('Failed to get raffle contract');
-      const result = await executeTransaction(raffleContract.endRaffle);
-      if (result.success) {
-        toast.success('Raffle ended successfully!');
-        window.location.reload();
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (err) {
-      toast.error('End Raffle failed: ' + (err?.message || err));
-    } finally {
-      setEndingRaffle(false);
-    }
-  };
-
   return (
     <div className="bg-background border border-border rounded-lg p-6">
       <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -432,6 +271,17 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
       </h3>
 
         <div className="space-y-4">
+          {/* Social Media Tasks Section */}
+          {socialTasks.length > 0 && (
+            <div className="mb-6">
+              <SocialTaskCompletion
+                raffleAddress={raffle.address}
+                tasks={socialTasks}
+                onTasksCompleted={handleTasksCompleted}
+              />
+            </div>
+          )}
+
         {/* Replace the grid in the purchase card with the new arrangement */}
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
@@ -458,7 +308,15 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
           </div>
 
         {/* Button/message area */}
-        {raffle.stateNum === 2 ? (
+        {raffle.state?.toLowerCase() === 'pending' && canActivate ? (
+          <button
+            onClick={handleActivateRaffle}
+            disabled={activating}
+            className="w-full bg-gradient-to-r from-green-500 to-green-700 text-white px-6 py-3 rounded-md hover:from-green-600 hover:to-green-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+          >
+            {activating ? 'Activating...' : 'Activate Raffle'}
+          </button>
+        ) : raffle.stateNum === 2 && (address?.toLowerCase() === raffle.creator.toLowerCase() || userTickets > 0) ? (
           <>
             <button
               onClick={handleRequestRandomness}
@@ -468,9 +326,17 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
               {requestingRandomness ? 'Requesting...' : 'Request Randomness'}
             </button>
             <p className="text-muted-foreground mt-4 text-center text-sm">
-              The raffle has ended. {userTickets > 0 ? 'As a participant, you can' : 'You can'} request the randomness to initiate winner selection.
+              The raffle has ended. {address?.toLowerCase() === raffle.creator.toLowerCase() ? 'As the creator' : 'As a participant'}, you can request the randomness to initiate winner selection.
             </p>
           </>
+        ) : isRaffleEnded() ? (
+          <button
+            onClick={handleEndRaffle}
+            disabled={endingRaffle}
+            className="w-full bg-gradient-to-r from-red-500 to-red-700 text-white px-6 py-3 rounded-md hover:from-red-600 hover:to-red-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+          >
+            {endingRaffle ? 'Ending...' : 'End Raffle'}
+          </button>
         ) : maxPurchasable <= 0 ? (
           <button
             disabled
@@ -507,25 +373,6 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
                   <span className="text-lg font-bold">{totalCost} ETH</span>
                 </div>
               </div>
-              {raffle.stateNum === 0 && canActivate ? (
-                <button
-                  onClick={handleActivateRaffle}
-                  disabled={activating || !connected}
-                  className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-md hover:from-green-700 hover:to-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
-                >
-                  <Trophy className="h-4 w-4" />
-                  {activating ? 'Activating...' : 'Activate Raffle'}
-                </button>
-              ) : hasRaffleEndedByTime() ? (
-                <button
-                  onClick={handleEndRaffle}
-                  disabled={endingRaffle || !connected}
-                  className="w-full bg-gradient-to-r from-red-600 to-orange-600 text-white px-6 py-3 rounded-md hover:from-red-700 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
-                >
-                  <Trophy className="h-4 w-4" />
-                  {endingRaffle ? 'Ending...' : 'End Raffle'}
-                </button>
-              ) : (
               <button
                 onClick={handlePurchase}
                 disabled={loading || !connected || !canPurchaseTickets()}
@@ -534,36 +381,74 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
                 <Ticket className="h-4 w-4" />
                 {loading ? 'Processing...' : `Purchase ${quantity} Ticket${quantity > 1 ? 's' : ''}`}
               </button>
-              )}
-              
-              {/* Claim Prize and Refund buttons - only show when raffle is completed */}
-              {(raffle.stateNum === 4 || raffle.stateNum === 7) && (
-                <div className="space-y-3 mt-4">
-                  {canClaimPrize() && (
-                    <button
-                      onClick={handleClaimPrize}
-                      disabled={claimingPrize || !connected}
-                      className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 text-white px-6 py-3 rounded-md hover:from-yellow-600 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <Trophy className="h-4 w-4" />
-                      {claimingPrize ? 'Claiming...' : 'Claim Prize'}
-                    </button>
-                  )}
-                  
-                  {canClaimRefund() && (
-                    <button
-                      onClick={handleClaimRefund}
-                      disabled={claimingRefund || !connected}
-                      className="w-full bg-gradient-to-r from-green-500 to-teal-600 text-white px-6 py-3 rounded-md hover:from-green-600 hover:to-teal-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <DollarSign className="h-4 w-4" />
-                      {claimingRefund ? 'Claiming...' : 'Claim Refund'}
-                    </button>
-                  )}
-                </div>
-              )}
             </>
           )}
+
+        {/* Mint/Claim/Refund buttons for completed raffles */}
+        {(raffle.stateNum === 4 || raffle.stateNum === 7) && (
+          <div className="flex flex-col gap-2 mt-6">
+            {/* Mint Prize (for creator, if eligible) */}
+            {isMintableERC721 && showMintInput !== undefined && setShowMintInput && mintWinnerAddress !== undefined && setMintWinnerAddress && mintingToWinner !== undefined && handleMintToWinner && (
+              <>
+                {!showMintInput ? (
+                  <Button
+                    onClick={() => setShowMintInput(true)}
+                    className="bg-gradient-to-r from-orange-500 to-red-600 text-white px-5 py-3 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-base"
+                  >
+                    Mint to Winner
+                  </Button>
+                ) : (
+                  <div className="flex flex-col sm:flex-row gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="Enter winner address"
+                      value={mintWinnerAddress}
+                      onChange={e => setMintWinnerAddress(e.target.value)}
+                      className="px-3 py-2 border border-border rounded-md bg-background w-72 font-mono"
+                      disabled={mintingToWinner}
+                    />
+                    <Button
+                      onClick={handleMintToWinner}
+                      disabled={mintingToWinner || !mintWinnerAddress || mintWinnerAddress.length !== 42}
+                      className="bg-gradient-to-r from-orange-500 to-red-600 text-white px-4 py-2 rounded-lg hover:from-orange-600 hover:to-red-700 transition-colors disabled:opacity-50"
+                    >
+                      {mintingToWinner ? 'Minting...' : 'Submit'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowMintInput(false)}
+                      disabled={mintingToWinner}
+                      className="ml-2"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+            {/* Claim Prize */}
+            {shouldShowClaimPrize && (
+              <Button
+                onClick={handleClaimPrize}
+                disabled={claimingPrize || prizeAlreadyClaimed}
+                className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-2 rounded-lg hover:from-blue-600 hover:to-purple-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {claimingPrize ? 'Claiming...' : prizeAlreadyClaimed ? 'Prize Claimed' : (isMintableERC721 ? 'Mint Prize' : 'Claim Prize')}
+              </Button>
+            )}
+            {/* Claim Refund */}
+            {shouldShowClaimRefund && (
+              <Button
+                onClick={handleClaimRefund}
+                disabled={claimingRefund}
+                className="bg-gradient-to-r from-green-500 to-blue-600 text-white px-6 py-2 rounded-lg hover:from-green-600 hover:to-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <DollarSign className="h-4 w-4" />
+                {claimingRefund ? 'Claiming...' : `Claim Refund${refundableAmount && refundableAmount.gt && refundableAmount.gt(0) ? ` (${ethers.utils.formatEther(refundableAmount)} ETH)` : ''}`}
+              </Button>
+            )}
+          </div>
+        )}
 
           {!connected && (
             <div className="text-center py-4">
@@ -638,10 +523,26 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
   const { address: connectedAddress } = useWallet();
   const [winners, setWinners] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [claimingPrize, setClaimingPrize] = useState(false);
+  const [claimingRefund, setClaimingRefund] = useState(false);
+  const [isWinner, setIsWinner] = useState(false);
+  const [eligibleForRefund, setEligibleForRefund] = useState(false);
+  const [refundClaimed, setRefundClaimed] = useState(false);
+  const [refundableAmount, setRefundableAmount] = useState(null);
   const [nonWinningTickets, setNonWinningTickets] = useState(0);
   // In WinnersSection, add state for open stats and stats data
   const [openStatsIndex, setOpenStatsIndex] = useState(null);
   const [winnerStats, setWinnerStats] = useState({});
+
+  // Winner/refund logic for rendering
+  const winnerObj = winners.find(w => w.address.toLowerCase() === connectedAddress?.toLowerCase());
+  const shouldShowClaimPrize = !!winnerObj && raffle.isPrized && (raffle.stateNum === 4 || raffle.stateNum === 7);
+  const prizeAlreadyClaimed = winnerObj && winnerObj.prizeClaimed;
+  const shouldShowClaimRefund =
+    raffle.isPrized &&
+    (raffle.stateNum === 4 || raffle.stateNum === 7) &&
+    eligibleForRefund &&
+    refundableAmount && refundableAmount.gt && refundableAmount.gt(0);
 
   useEffect(() => {
     const fetchWinners = async () => {
@@ -650,6 +551,10 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
       if (raffle.stateNum !== 4 && raffle.stateNum !== 7) {
         console.log('Raffle not in completed state, skipping winners fetch');
         setWinners([]);
+        setIsWinner(false);
+        setEligibleForRefund(false);
+        setRefundClaimed(false);
+        setRefundableAmount(null);
         setNonWinningTickets(0); // Reset non-winning tickets
         return;
       }
@@ -705,10 +610,30 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
         }
         console.log('Final winners array:', winnersArray);
         setWinners(winnersArray);
+        // Check if connected user is a winner
+        const winner = winnersArray.find(w => w.address.toLowerCase() === connectedAddress?.toLowerCase());
+        setIsWinner(!!winner);
+        // Fetch refundable amount using getRefundableAmount
+        if (connectedAddress && raffle.isPrized) {
+          try {
+            const refundable = await raffleContract.getRefundableAmount(connectedAddress);
+            setRefundableAmount(refundable);
+            setEligibleForRefund(refundable && refundable.gt && refundable.gt(0));
+          } catch (e) {
+            setRefundableAmount(null);
+            setEligibleForRefund(false);
+          }
+        } else {
+          setEligibleForRefund(false);
+        }
         // Remove old nonWinningTickets logic
         setNonWinningTickets(0);
       } catch (error) {
         setWinners([]);
+        setIsWinner(false);
+        setEligibleForRefund(false);
+        setRefundClaimed(false);
+        setRefundableAmount(null);
         setNonWinningTickets(0); // Reset non-winning tickets on error
       } finally {
         setLoading(false);
@@ -717,7 +642,132 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
     fetchWinners();
   }, [raffle, getContractInstance, connectedAddress]);
 
+  useEffect(() => {
+    console.log('[WinnersSection Debug]');
+    console.log('nonWinningTickets:', nonWinningTickets);
+    console.log('shouldShowClaimRefund:', shouldShowClaimRefund);
+    console.log('refundClaimed:', refundClaimed);
+    console.log('raffle.stateNum:', raffle.stateNum);
+    console.log('raffle.isPrized:', raffle.isPrized);
+  }, [nonWinningTickets, shouldShowClaimRefund, refundClaimed, raffle]);
 
+  const handleClaimPrize = async () => {
+    if (!connectedAddress || !raffle || !getContractInstance) {
+      toast.error('Please connect your wallet to claim your prize');
+      return;
+    }
+
+    // Check if user is a winner
+    const isWinner = winners.some(winner => 
+      winner.address.toLowerCase() === connectedAddress.toLowerCase()
+    );
+
+    if (!isWinner) {
+      toast.error('You are not a winner of this raffle');
+      return;
+    }
+
+    // Check if prize is already claimed
+    const winner = winners.find(w => 
+      w.address.toLowerCase() === connectedAddress.toLowerCase()
+    );
+
+    if (winner && winner.prizeClaimed) {
+      toast.error('You have already claimed your prize');
+      return;
+    }
+
+    setClaimingPrize(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) {
+        throw new Error('Failed to get raffle contract');
+      }
+
+      // Call claimPrize function
+      const result = await executeTransaction(
+        raffleContract.claimPrize
+      );
+
+      if (result.success) {
+        // Determine prize type for success message
+        let prizeType = 'prize';
+        if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
+          prizeType = `${ethers.utils.formatEther(raffle.ethPrizeAmount)} ETH`;
+        } else if (raffle.erc20PrizeToken && raffle.erc20PrizeToken !== ethers.constants.AddressZero && raffle.erc20PrizeAmount && raffle.erc20PrizeAmount.gt && raffle.erc20PrizeAmount.gt(0)) {
+          prizeType = `${ethers.utils.formatUnits(raffle.erc20PrizeAmount, 18)} ERC20 tokens`;
+        } else if (raffle.prizeCollection && raffle.prizeCollection !== ethers.constants.AddressZero) {
+          prizeType = raffle.standard === 0 ? 'ERC721 NFT' : 'ERC1155 NFT';
+        }
+
+        toast.success(`Successfully claimed your ${prizeType}!`);
+        // Refresh the page to update the UI
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      console.error('Error claiming prize:', error);
+      toast.error(extractRevertReason(error));
+    } finally {
+      setClaimingPrize(false);
+    }
+  };
+
+  const handleClaimRefund = async () => {
+    if (!connectedAddress || !raffle || !getContractInstance) {
+      toast.error('Please connect your wallet to claim your refund');
+      return;
+    }
+    setClaimingRefund(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) {
+        throw new Error('Failed to get raffle contract');
+      }
+      const result = await executeTransaction(raffleContract.claimRefund);
+      if (result.success) {
+        toast.success('Successfully claimed your refund!');
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      console.error('Error claiming refund:', error);
+      toast.error(extractRevertReason(error));
+    } finally {
+      setClaimingRefund(false);
+    }
+  };
+
+  const canClaimPrize = () => {
+    // Can only claim if:
+    // 1. User is connected
+    // 2. Raffle is completed
+    // 3. Raffle has prizes (not whitelist)
+    // 4. User is a winner
+    // 5. User hasn't claimed yet
+    if (!connectedAddress || !raffle.isPrized) return false;
+    
+    if (raffle.stateNum !== 4 && raffle.stateNum !== 7) return false;
+    
+    const winner = winners.find(w => 
+      w.address.toLowerCase() === connectedAddress.toLowerCase()
+    );
+    
+    return winner && !winner.prizeClaimed;
+  };
+
+  const canClaimRefund = () => {
+    // Only for completed raffles, prized raffles, not whitelist, user is eligible, and not already claimed
+    return (
+      raffle.isPrized &&
+      (raffle.stateNum === 4 || raffle.stateNum === 7) &&
+      eligibleForRefund &&
+      !refundClaimed &&
+      refundableAmount && refundableAmount.gt && refundableAmount.gt(0)
+    );
+  };
 
   const getPrizeTypeDescription = () => {
     if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
@@ -916,6 +966,7 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
     <Card className="bg-background">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="text-xl">Winners</CardTitle>
+        <div className="flex gap-2"></div>
       </CardHeader>
       <CardContent className="overflow-y-auto p-2">
         {getStateDisplay()}
@@ -984,16 +1035,6 @@ function getRefundability(raffle) {
   return { label: 'Non-winning Tickets Refundable', refundable: true, reason: 'This raffle supports refunds for non-winning tickets.' };
 }
 
-// Utility to extract only the revert reason from contract errors
-function extractRevertReason(error) {
-  if (error?.reason) return error.reason;
-  if (error?.data?.message) return error.data.message;
-  const msg = error?.message || error?.data?.message || error?.toString() || '';
-  const match = msg.match(/execution reverted:?\s*([^\n]*)/i);
-  if (match && match[1]) return match[1].trim();
-  return msg;
-}
-
 const RaffleDetailPage = () => {
   const { raffleAddress } = useParams();
   const navigate = useNavigate();
@@ -1004,7 +1045,6 @@ const RaffleDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [timeRemaining, setTimeRemaining] = useState('');
   const [isEscrowedPrize, setIsEscrowedPrize] = useState(false);
-  const [depositingPrize, setDepositingPrize] = useState(false);
   const [withdrawingPrize, setWithdrawingPrize] = useState(false);
   const [deletingRaffle, setDeletingRaffle] = useState(false);
   const [is1155Approved, setIs1155Approved] = useState(false);
@@ -1018,9 +1058,6 @@ const RaffleDetailPage = () => {
   const [isERC721Approved, setIsERC721Approved] = useState(false);
   const [checkingERC721Approval, setCheckingERC721Approval] = useState(false);
   const [approvingERC721, setApprovingERC721] = useState(false);
-  // Add state to track if prizes are already deposited
-  const [prizesAlreadyDeposited, setPrizesAlreadyDeposited] = useState(false);
-  const [checkingPrizeDeposit, setCheckingPrizeDeposit] = useState(false);
 
   // Add these states and handler at the top level of RaffleDetailPage (inside the component):
   const [showMintInput, setShowMintInput] = useState(false);
@@ -1040,7 +1077,7 @@ const RaffleDetailPage = () => {
         throw new Error(result.error);
       }
     } catch (err) {
-      toast.error('mintToWinner failed: ' + err.message);
+      toast.error(extractRevertReason(err));
     } finally {
       setMintingToWinner(false);
     }
@@ -1064,7 +1101,7 @@ const RaffleDetailPage = () => {
         throw new Error(result.error);
       }
     } catch (err) {
-      toast.error('Assign Prize failed: ' + err.message);
+      toast.error(extractRevertReason(err));
     } finally {
       setAssigningPrize(false);
     }
@@ -1184,7 +1221,7 @@ const RaffleDetailPage = () => {
         setRaffle(raffleData);
       } catch (error) {
         console.error('Error fetching raffle data:', error);
-          toast.error(formatErrorForToast(error));
+        toast.error(extractRevertReason(error));
         // Navigate back if raffle doesn't exist
         navigate('/');
       } finally {
@@ -1267,89 +1304,6 @@ const RaffleDetailPage = () => {
     fetchEscrowedPrizeFlag();
   }, [raffleAddress, getContractInstance]);
 
-  // Check if prizes are already deposited
-  useEffect(() => {
-    const checkPrizeDeposit = async () => {
-      if (!raffle || !getContractInstance) return;
-      
-      setCheckingPrizeDeposit(true);
-      try {
-        const raffleContract = getContractInstance(raffle.address, 'raffle');
-        if (!raffleContract) return;
-
-        let deposited = false;
-
-        // Check ETH prize
-        if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
-          console.log('Checking ETH prize deposit status...');
-          console.log('Required ETH Amount:', raffle.ethPrizeAmount.toString());
-          const contractBalance = await raffleContract.provider.getBalance(raffle.address);
-          console.log('Contract ETH Balance:', contractBalance.toString());
-          deposited = contractBalance.gte(raffle.ethPrizeAmount);
-          console.log('Deposited:', deposited);
-        }
-        // Check ERC20 prize
-        else if (raffle.erc20PrizeToken && raffle.erc20PrizeToken !== ethers.constants.AddressZero && raffle.erc20PrizeAmount && raffle.erc20PrizeAmount.gt && raffle.erc20PrizeAmount.gt(0)) {
-          console.log('Checking ERC20 prize deposit status...');
-          console.log('ERC20 Token:', raffle.erc20PrizeToken);
-          console.log('Required Amount:', raffle.erc20PrizeAmount.toString());
-          const erc20Contract = new ethers.Contract(raffle.erc20PrizeToken, contractABIs.erc20, raffleContract.provider);
-          const contractBalance = await erc20Contract.balanceOf(raffle.address);
-          console.log('Contract Balance:', contractBalance.toString());
-          deposited = contractBalance.gte(raffle.erc20PrizeAmount);
-          console.log('Deposited:', deposited);
-        }
-        // Check NFT prizes (ERC721/ERC1155)
-        else if (raffle.prizeCollection && raffle.prizeCollection !== ethers.constants.AddressZero) {
-          console.log('Checking NFT prize deposit status...');
-          console.log('Prize Collection:', raffle.prizeCollection);
-          console.log('Standard:', raffle.standard);
-          console.log('Token ID:', raffle.prizeTokenId);
-          
-          if (raffle.standard === 0) { // ERC721
-            const erc721Contract = new ethers.Contract(raffle.prizeCollection, contractABIs.erc721Prize, raffleContract.provider);
-            try {
-              const owner = await erc721Contract.ownerOf(raffle.prizeTokenId);
-              console.log('ERC721 Owner:', owner);
-              deposited = owner.toLowerCase() === raffle.address.toLowerCase();
-              console.log('Deposited:', deposited);
-            } catch (e) {
-              console.log('ERC721 Error:', e);
-              deposited = false;
-            }
-          } else if (raffle.standard === 1) { // ERC1155
-            const erc1155Contract = new ethers.Contract(raffle.prizeCollection, contractABIs.erc1155Prize, raffleContract.provider);
-            try {
-              const balance = await erc1155Contract.balanceOf(raffle.address, raffle.prizeTokenId);
-              console.log('ERC1155 Balance:', balance.toString());
-              deposited = balance.gt(0);
-              console.log('Deposited:', deposited);
-            } catch (e) {
-              console.log('ERC1155 Error:', e);
-              deposited = false;
-            }
-          }
-        }
-
-        // If no prize type is detected, assume not deposited
-        if (!raffle.ethPrizeAmount && !raffle.erc20PrizeToken && !raffle.prizeCollection) {
-          console.log('No prize type detected, assuming not deposited');
-          deposited = false;
-        }
-
-        console.log('Final deposited status:', deposited);
-        setPrizesAlreadyDeposited(deposited);
-      } catch (e) {
-        console.error('Error checking prize deposit status:', e);
-        setPrizesAlreadyDeposited(false);
-      } finally {
-        setCheckingPrizeDeposit(false);
-      }
-    };
-
-    checkPrizeDeposit();
-  }, [raffle, getContractInstance]);
-
   // Check ERC1155 approval status if needed
   useEffect(() => {
     const checkApproval = async () => {
@@ -1386,21 +1340,19 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.prizeCollection || !address) return;
     setApproving(true);
     try {
-      const erc1155 = getContractInstance(raffle.prizeCollection, 'erc1155Prize');
-      if (!erc1155) {
-        throw new Error('Failed to get ERC1155 contract instance');
-      }
-      
-      const result = await executeTransaction(erc1155.setApprovalForAll, raffle.address, true);
-      
-      if (result.success) {
+      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
+      const signer = provider.getSigner();
+      const erc1155 = new ethers.Contract(
+        raffle.prizeCollection,
+        contractABIs.erc1155Prize,
+        signer
+      );
+      const tx = await erc1155.setApprovalForAll(raffle.address, true);
+      await tx.wait();
       setIs1155Approved(true);
-        toast.success('Approval successful! You can now deposit the prize.');
-      } else {
-        throw new Error(result.error);
-      }
+      toast.success('Approval successful! You can now deposit the prize.');
     } catch (e) {
-      toast.error('Approval failed: ' + (e?.reason || e?.message || e));
+      toast.error(extractRevertReason(e));
     } finally {
       setApproving(false);
     }
@@ -1443,22 +1395,20 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.erc20PrizeToken || !raffle.erc20PrizeAmount || !address) return;
     setApprovingERC20(true);
     try {
-      const erc20 = getContractInstance(raffle.erc20PrizeToken, 'erc20');
-      if (!erc20) {
-        throw new Error('Failed to get ERC20 contract instance');
-      }
-      
+      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
+      const signer = provider.getSigner();
+      const erc20 = new ethers.Contract(
+        raffle.erc20PrizeToken,
+        contractABIs.erc20,
+        signer
+      );
       // Approve max uint256 for convenience
-      const result = await executeTransaction(erc20.approve, raffle.address, ethers.constants.MaxUint256);
-      
-      if (result.success) {
+      const tx = await erc20.approve(raffle.address, ethers.constants.MaxUint256);
+      await tx.wait();
       setIsERC20Approved(true);
-        toast.success('ERC20 approval successful! You can now deposit the prize.');
-      } else {
-        throw new Error(result.error);
-      }
+      toast.success('ERC20 approval successful! You can now deposit the prize.');
     } catch (e) {
-      toast.error('ERC20 approval failed: ' + (e?.reason || e?.message || e));
+      toast.error(extractRevertReason(e));
     } finally {
       setApprovingERC20(false);
     }
@@ -1508,21 +1458,19 @@ const RaffleDetailPage = () => {
     if (!raffle || !raffle.prizeCollection || typeof raffle.prizeTokenId === 'undefined' || !address) return;
     setApprovingERC721(true);
     try {
-      const erc721 = getContractInstance(raffle.prizeCollection, 'erc721Prize');
-      if (!erc721) {
-        throw new Error('Failed to get ERC721 contract instance');
-      }
-      
-      const result = await executeTransaction(erc721.approve, raffle.address, raffle.prizeTokenId);
-      
-      if (result.success) {
+      const provider = window.ethereum ? new ethers.providers.Web3Provider(window.ethereum) : ethers.getDefaultProvider();
+      const signer = provider.getSigner();
+      const erc721 = new ethers.Contract(
+        raffle.prizeCollection,
+        contractABIs.erc721Prize,
+        signer
+      );
+      const tx = await erc721.approve(raffle.address, raffle.prizeTokenId);
+      await tx.wait();
       setIsERC721Approved(true);
-        toast.success('ERC721 approval successful! You can now deposit the prize.');
-      } else {
-        throw new Error(result.error);
-      }
+      toast.success('ERC721 approval successful! You can now deposit the prize.');
     } catch (e) {
-      toast.error('ERC721 approval failed: ' + (e?.reason || e?.message || e));
+      toast.error(extractRevertReason(e));
     } finally {
       setApprovingERC721(false);
     }
@@ -1558,6 +1506,19 @@ const RaffleDetailPage = () => {
   const handleDeleteRaffle = async () => {
     if (!raffle || !getContractInstance) return;
     
+    // Debug logging
+    console.log('Attempting to delete raffle:', {
+      address: raffle.address,
+      state: raffle.state,
+      stateNum: raffle.stateNum,
+      creator: raffle.creator,
+      userAddress: address,
+      isCreator: address?.toLowerCase() === raffle.creator.toLowerCase(),
+      prizeCollection: raffle.prizeCollection,
+      usesCustomPrice: raffle.usesCustomPrice,
+      canDelete: canDelete()
+    });
+    
     setDeletingRaffle(true);
     try {
       const raffleContract = getContractInstance(raffle.address, 'raffle');
@@ -1568,8 +1529,9 @@ const RaffleDetailPage = () => {
       const tx = await raffleContract.deleteRaffle();
       await tx.wait();
       
+      // Show success message or redirect
       toast.success('Raffle deleted successfully!');
-      navigate('/');
+        navigate('/');
     } catch (error) {
       console.error('Error deleting raffle:', error);
       toast.error(extractRevertReason(error));
@@ -1580,9 +1542,18 @@ const RaffleDetailPage = () => {
 
   const canDelete = () => {
     // Can delete if user is the creator and raffle is in pending or active state
-    return connected && 
-           address?.toLowerCase() === raffle?.creator.toLowerCase() && 
-           (raffle?.state === 'pending' || raffle?.state === 'active');
+    // For raffles with prizes and custom pricing, additional conditions apply
+    const basicConditions = connected && 
+                           address?.toLowerCase() === raffle?.creator.toLowerCase() && 
+                           (raffle?.state === 'Pending' || raffle?.state === 'Active');
+    
+    // If raffle has a prize collection and uses custom pricing, check those conditions
+    if (raffle?.prizeCollection && raffle?.prizeCollection !== ethers.constants.AddressZero && raffle?.usesCustomPrice) {
+      return basicConditions && raffle?.prizeCollection && raffle?.prizeCollection !== ethers.constants.AddressZero && raffle?.usesCustomPrice;
+    }
+    
+    // For other raffle types (non-prized, ETH prizes, etc.), only check basic conditions
+    return basicConditions;
   };
 
   const getStatusBadge = () => {
@@ -1603,40 +1574,15 @@ const RaffleDetailPage = () => {
     return <span className={`px-3 py-1 rounded-full text-sm ${colorMap[label] || colorMap['Unknown']}`}>{label}</span>;
   };
 
-  async function handleDepositPrize() {
-    setDepositingPrize(true);
-    try {
-      const contract = getContractInstance(raffleAddress, 'raffle');
-      const result = await executeTransaction(
-        contract.depositEscrowPrize,
-        { value: raffle.ethPrizeAmount || 0 }
-      );
-      
-      if (result.success) {
-        toast.success('Prize deposited successfully!');
-      } else {
-        throw new Error(result.error);
-      }
-    } catch (e) {
-      toast.error('Deposit failed: ' + (e?.reason || e?.message || e));
-    } finally {
-      setDepositingPrize(false);
-    }
-  }
-
   async function handleWithdrawPrize() {
     setWithdrawingPrize(true);
     try {
       const contract = getContractInstance(raffleAddress, 'raffle');
-      const result = await executeTransaction(contract.withdrawEscrowedPrize);
-      
-      if (result.success) {
-        toast.success('Prize withdrawn successfully!');
-      } else {
-        throw new Error(result.error);
-      }
+      const tx = await contract.withdrawEscrowedPrize();
+      await tx.wait();
+      toast.success('Prize withdrawn successfully!');
     } catch (e) {
-      toast.error('Withdraw failed: ' + (e?.reason || e?.message || e));
+      toast.error(extractRevertReason(e));
     } finally {
       setWithdrawingPrize(false);
     }
@@ -1648,9 +1594,7 @@ const RaffleDetailPage = () => {
     console.log('isEscrowedPrize:', isEscrowedPrize);
     console.log('is1155Approved:', is1155Approved);
     console.log('checkingApproval:', checkingApproval);
-    console.log('prizesAlreadyDeposited:', prizesAlreadyDeposited);
-    console.log('checkingPrizeDeposit:', checkingPrizeDeposit);
-  }, [raffle, isEscrowedPrize, is1155Approved, checkingApproval, prizesAlreadyDeposited, checkingPrizeDeposit]);
+  }, [raffle, isEscrowedPrize, is1155Approved, checkingApproval]);
 
   // Determine if activation is allowed
   const now = Math.floor(Date.now() / 1000);
@@ -1659,6 +1603,165 @@ const RaffleDetailPage = () => {
   // ... at the top of RaffleDetailPage, after other useState hooks ...
   const [timeLabel, setTimeLabel] = useState('');
   const [timeValue, setTimeValue] = useState('');
+
+  // 1. Move winner/refund state and logic to RaffleDetailPage
+  // (Insert after other useState hooks in RaffleDetailPage)
+  const [winners, setWinners] = useState([]);
+  const [loadingWinners, setLoadingWinners] = useState(false);
+  const [claimingPrize, setClaimingPrize] = useState(false);
+  const [claimingRefund, setClaimingRefund] = useState(false);
+  const [isWinner, setIsWinner] = useState(false);
+  const [eligibleForRefund, setEligibleForRefund] = useState(false);
+  const [refundClaimed, setRefundClaimed] = useState(false);
+  const [refundableAmount, setRefundableAmount] = useState(null);
+  const [nonWinningTickets, setNonWinningTickets] = useState(0);
+
+  // Winner/refund logic for rendering
+  const winnerObj = winners.find(w => w.address.toLowerCase() === address?.toLowerCase());
+  const shouldShowClaimPrize = !!winnerObj && raffle?.isPrized && (raffle?.stateNum === 4 || raffle?.stateNum === 7);
+  const prizeAlreadyClaimed = winnerObj && winnerObj.prizeClaimed;
+  const shouldShowClaimRefund =
+    raffle?.isPrized &&
+    (raffle?.stateNum === 4 || raffle?.stateNum === 7) &&
+    eligibleForRefund &&
+    refundableAmount && refundableAmount.gt && refundableAmount.gt(0);
+
+  useEffect(() => {
+    async function fetchWinners() {
+      if (!raffle || (raffle.stateNum !== 4 && raffle.stateNum !== 7)) {
+        setWinners([]);
+        setIsWinner(false);
+        setEligibleForRefund(false);
+        setRefundClaimed(false);
+        setRefundableAmount(null);
+        setNonWinningTickets(0);
+        return;
+      }
+      setLoadingWinners(true);
+      try {
+        const raffleContract = getContractInstance && getContractInstance(raffle.address, 'raffle');
+        if (!raffleContract) {
+          setWinners([]);
+          setLoadingWinners(false);
+          return;
+        }
+        const winnersCount = await raffleContract.winnersCount();
+        const count = winnersCount.toNumber ? winnersCount.toNumber() : Number(winnersCount);
+        if (count === 0) {
+          setWinners([]);
+          setLoadingWinners(false);
+          return;
+        }
+        const winnersArray = [];
+        for (let i = 0; i < count; i++) {
+          try {
+            const winnerAddress = await raffleContract.winners(i);
+            if (winnerAddress === ethers.constants.AddressZero || winnerAddress === '0x0000000000000000000000000000000000000000') {
+              continue;
+            }
+            const claimedWins = await raffleContract.claimedWins(winnerAddress);
+            const prizeClaimed = await raffleContract.prizeClaimed(winnerAddress);
+            winnersArray.push({
+              address: winnerAddress,
+              index: i,
+              claimedWins: claimedWins.toNumber ? claimedWins.toNumber() : Number(claimedWins),
+              prizeClaimed: prizeClaimed
+            });
+          } catch (error) {
+            continue;
+          }
+        }
+        setWinners(winnersArray);
+        const winner = winnersArray.find(w => w.address.toLowerCase() === address?.toLowerCase());
+        setIsWinner(!!winner);
+        if (address && raffle.isPrized) {
+          try {
+            const refundable = await raffleContract.getRefundableAmount(address);
+            setRefundableAmount(refundable);
+            setEligibleForRefund(refundable && refundable.gt && refundable.gt(0));
+          } catch (e) {
+            setRefundableAmount(null);
+            setEligibleForRefund(false);
+          }
+        }
+        setNonWinningTickets(0);
+      } catch (error) {
+        setWinners([]);
+        setIsWinner(false);
+        setEligibleForRefund(false);
+        setRefundClaimed(false);
+        setRefundableAmount(null);
+        setNonWinningTickets(0);
+      } finally {
+        setLoadingWinners(false);
+      }
+    }
+    fetchWinners();
+  }, [raffle, getContractInstance, address]);
+
+  const handleClaimPrize = async () => {
+    if (!address || !raffle || !getContractInstance) {
+      toast.error('Please connect your wallet to claim your prize');
+      return;
+    }
+    const isWinner = winners.some(winner => winner.address.toLowerCase() === address.toLowerCase());
+    if (!isWinner) {
+      toast.error('You are not a winner of this raffle');
+      return;
+    }
+    const winner = winners.find(w => winner.address.toLowerCase() === address.toLowerCase());
+    if (winner && winner.prizeClaimed) {
+      toast.error('You have already claimed your prize');
+      return;
+    }
+    setClaimingPrize(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) throw new Error('Failed to get raffle contract');
+      const result = await executeTransaction(raffleContract.claimPrize);
+      if (result.success) {
+        let prizeType = 'prize';
+        if (raffle.ethPrizeAmount && raffle.ethPrizeAmount.gt && raffle.ethPrizeAmount.gt(0)) {
+          prizeType = `${ethers.utils.formatEther(raffle.ethPrizeAmount)} ETH`;
+        } else if (raffle.erc20PrizeToken && raffle.erc20PrizeToken !== ethers.constants.AddressZero && raffle.erc20PrizeAmount && raffle.erc20PrizeAmount.gt && raffle.erc20PrizeAmount.gt(0)) {
+          prizeType = `${ethers.utils.formatUnits(raffle.erc20PrizeAmount, 18)} ERC20 tokens`;
+        } else if (raffle.prizeCollection && raffle.prizeCollection !== ethers.constants.AddressZero) {
+          prizeType = raffle.standard === 0 ? 'ERC721 NFT' : 'ERC1155 NFT';
+        }
+        toast.success(`Successfully claimed your ${prizeType}!`);
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      toast.error(extractRevertReason(error));
+    } finally {
+      setClaimingPrize(false);
+    }
+  };
+
+  const handleClaimRefund = async () => {
+    if (!address || !raffle || !getContractInstance) {
+      toast.error('Please connect your wallet to claim your refund');
+      return;
+    }
+    setClaimingRefund(true);
+    try {
+      const raffleContract = getContractInstance(raffle.address, 'raffle');
+      if (!raffleContract) throw new Error('Failed to get raffle contract');
+      const result = await executeTransaction(raffleContract.claimRefund);
+      if (result.success) {
+        toast.success('Successfully claimed your refund!');
+        window.location.reload();
+      } else {
+        throw new Error(result.error);
+      }
+    } catch (error) {
+      toast.error(extractRevertReason(error));
+    } finally {
+      setClaimingRefund(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -1720,12 +1823,7 @@ const RaffleDetailPage = () => {
           </div>
           <div className="flex items-center gap-3">
             {getStatusBadge()}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              (raffle.stateNum === 0 || raffle.stateNum === 1) &&
-              raffle.prizeCollection &&
-              raffle.prizeCollection !== ethers.constants.AddressZero &&
-              raffle.usesCustomPrice && (
+            {canDelete() && (
                 <Button
                 onClick={handleDeleteRaffle}
                 className="flex items-center gap-2 bg-gradient-to-r from-red-500 to-pink-600 text-white px-4 py-2 rounded-md hover:from-red-600 hover:to-pink-700 transition-colors text-sm font-medium"
@@ -1782,85 +1880,6 @@ const RaffleDetailPage = () => {
                 )}
               </div>
             )}
-            {/* ERC20 Approval and Deposit Prize logic */}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize &&
-              raffle.erc20PrizeToken &&
-              raffle.erc20PrizeToken !== ethers.constants.AddressZero &&
-              raffle.erc20PrizeAmount &&
-              !prizesAlreadyDeposited && (
-                !isERC20Approved ? (
-                <Button
-                  onClick={handleApproveERC20}
-                  className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={approvingERC20 || checkingERC20Approval}
-                >
-                  {approvingERC20 ? 'Approving...' : 'Approve ERC20 Prize'}
-                </Button>
-                ) : (
-                <Button
-                  onClick={handleDepositPrize}
-                  className="ml-2 bg-green-600 hover:bg-green-700 text-white"
-                  disabled={depositingPrize}
-                >
-                  {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
-                </Button>
-                )
-            )}
-            {/* ERC721 Approval and Deposit Prize logic */}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize &&
-              raffle.standard === 0 &&
-              raffle.prizeCollection &&
-              typeof raffle.prizeTokenId !== 'undefined' &&
-              !prizesAlreadyDeposited && (
-                !isERC721Approved ? (
-                <Button
-                  onClick={handleApproveERC721}
-                  className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={approvingERC721 || checkingERC721Approval}
-                >
-                  {approvingERC721 ? 'Approving...' : 'Approve NFT Prize'}
-                </Button>
-                ) : (
-                <Button
-                  onClick={handleDepositPrize}
-                  className="ml-2 bg-green-600 hover:bg-green-700 text-white"
-                  disabled={depositingPrize}
-                >
-                  {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
-                </Button>
-                )
-            )}
-            {/* ERC1155 Approval and Deposit Prize logic */}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize &&
-              raffle.standard === 1 &&
-              !prizesAlreadyDeposited && (
-                checkingApproval ? (
-                  <Button disabled className="ml-2 bg-blue-300 text-white">Checking approval...</Button>
-                ) : !is1155Approved ? (
-                  <Button
-                    onClick={handleApprove1155}
-                    className="ml-2 bg-blue-600 hover:bg-blue-700 text-white"
-                    disabled={approving}
-                  >
-                    {approving ? 'Approving...' : 'Approve NFT Prize'}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleDepositPrize}
-                    className="ml-2 bg-green-600 hover:bg-green-700 text-white"
-                    disabled={depositingPrize}
-                  >
-                    {depositingPrize ? 'Depositing...' : 'Deposit Prize'}
-                  </Button>
-                )
-              )
-            }
             {/* Withdraw Prize button for creator if escrowed and not withdrawn */}
             {connected &&
               address?.toLowerCase() === raffle.creator.toLowerCase() &&
@@ -1876,20 +1895,6 @@ const RaffleDetailPage = () => {
                 </Button>
               )
             }
-            {/* Prize Deposit Status Indicator */}
-            {connected &&
-              address?.toLowerCase() === raffle.creator.toLowerCase() &&
-              isEscrowedPrize && (
-                checkingPrizeDeposit ? (
-                  <div className="ml-2 px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                    Checking deposit status...
-                  </div>
-                ) : prizesAlreadyDeposited ? (
-                  <div className="ml-2 px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                    ✓ Prize Deposited
-                  </div>
-                ) : null
-            )}
             {!raffle.isPrized &&
               raffle.stateNum === 0 &&
               connected &&
@@ -1997,7 +2002,27 @@ const RaffleDetailPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 h-full">
         {/* Left Half - Raffle Engagement */}
         <div className="space-y-6 h-full">
-          <TicketPurchaseSection raffle={raffle} onPurchase={handlePurchaseTickets} timeRemaining={timeRemaining} />
+          <TicketPurchaseSection
+            raffle={raffle}
+            onPurchase={handlePurchaseTickets}
+            timeRemaining={timeRemaining}
+            winners={winners}
+            shouldShowClaimPrize={shouldShowClaimPrize}
+            prizeAlreadyClaimed={prizeAlreadyClaimed}
+            claimingPrize={claimingPrize}
+            handleClaimPrize={handleClaimPrize}
+            shouldShowClaimRefund={shouldShowClaimRefund}
+            claimingRefund={claimingRefund}
+            handleClaimRefund={handleClaimRefund}
+            refundableAmount={refundableAmount}
+            isMintableERC721={isMintableERC721}
+            showMintInput={showMintInput}
+            setShowMintInput={setShowMintInput}
+            mintWinnerAddress={mintWinnerAddress}
+            setMintWinnerAddress={setMintWinnerAddress}
+            mintingToWinner={mintingToWinner}
+            handleMintToWinner={handleMintToWinner}
+          />
           
           {/* Additional Raffle Details */}
           <div className="bg-background border border-border rounded-lg p-6">

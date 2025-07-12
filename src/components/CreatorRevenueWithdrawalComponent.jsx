@@ -69,10 +69,10 @@ const CreatorRevenueWithdrawalComponent = () => {
         totalRevenue
       });
 
-          } catch (error) {
-        console.error('Error loading raffle info:', error);
+    } catch (error) {
+      console.error('Error loading raffle info:', error);
         toast.error(formatErrorForToast(error));
-        setRaffleData({
+      setRaffleData({
         address: raffleAddress,
         revenueAmount: '0',
         isCreator: false,
@@ -139,10 +139,10 @@ const CreatorRevenueWithdrawalComponent = () => {
       } else {
         throw new Error(result.error);
       }
-          } catch (error) {
-        console.error('Error withdrawing revenue:', error);
+    } catch (error) {
+      console.error('Error withdrawing revenue:', error);
         toast.error(formatErrorForToast(error));
-      } finally {
+    } finally {
       setLoading(false);
     }
   };

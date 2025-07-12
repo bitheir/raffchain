@@ -72,11 +72,11 @@ const RoyaltyAdjustmentComponent = () => {
         royaltyRecipient: royaltyRecipient
       }));
 
-          } catch (error) {
-        console.error('Error loading collection info:', error);
+    } catch (error) {
+      console.error('Error loading collection info:', error);
         toast.error(formatErrorForToast(error));
-        setCollectionInfo(null);
-      } finally {
+      setCollectionInfo(null);
+    } finally {
       setLoadingInfo(false);
     }
   };
@@ -128,10 +128,10 @@ const RoyaltyAdjustmentComponent = () => {
       } else {
         throw new Error(result.error);
       }
-          } catch (error) {
-        console.error('Error updating royalty:', error);
+    } catch (error) {
+      console.error('Error updating royalty:', error);
         toast.error(formatErrorForToast(error));
-      } finally {
+    } finally {
       setLoading(false);
     }
   };

@@ -907,10 +907,10 @@ const ProfilePage = () => {
       } else {
         throw new Error(result.error);
       }
-          } catch (error) {
-        console.error('Error deleting raffle:', error);
+    } catch (error) {
+      console.error('Error deleting raffle:', error);
         toast.error(formatErrorForToast(error));
-      }
+    }
   };
 
   const handleViewRevenue = (raffle) => {

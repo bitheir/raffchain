@@ -458,17 +458,17 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
           </div>
 
         {/* Button/message area */}
-        {raffle.stateNum === 2 && userTickets > 0 ? (
+        {raffle.stateNum === 2 ? (
           <>
             <button
               onClick={handleRequestRandomness}
-              disabled={requestingRandomness}
+              disabled={requestingRandomness || !connected}
               className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-md hover:from-blue-700 hover:to-purple-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
             >
               {requestingRandomness ? 'Requesting...' : 'Request Randomness'}
             </button>
             <p className="text-muted-foreground mt-4 text-center text-sm">
-              The raffle has ended. As a participant, you can request the randomness to initiate winner selection.
+              The raffle has ended. You can request the randomness to initiate winner selection.
             </p>
           </>
         ) : maxPurchasable <= 0 ? (

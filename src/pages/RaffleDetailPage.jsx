@@ -449,121 +449,104 @@ const TicketPurchaseSection = ({ raffle, onPurchase, timeRemaining }) => {
           <div>
             <span className="text-muted-foreground">Winning Chance:</span>
             <p className="font-semibold text-lg">{winningChance !== null ? `${winningChance}%` : 'N/A'}</p>
-            </div>
+          </div>
+          {/* Refundable Amount Row - only show when refunds are possible and user is eligible */}
+          {canClaimRefund() && refundableAmount && refundableAmount.gt && refundableAmount.gt(0) && (
             <div>
-              <span className="text-muted-foreground">Max per user:</span>
-              <p className="font-semibold text-lg">{raffle.maxTicketsPerParticipant}</p>
+              <span className="text-muted-foreground">Your Refundable Amount:</span>
+              <p className="font-semibold text-lg">{ethers.utils.formatEther(refundableAmount)} ETH</p>
             </div>
+          )}
+          <div>
+            <span className="text-muted-foreground">Max per user:</span>
+            <p className="font-semibold text-lg">{raffle.maxTicketsPerParticipant}</p>
+          </div>
           <div></div>
           </div>
 
         {/* Button/message area */}
-        {raffle.stateNum === 2 ? (
-          <>
-            <button
-              onClick={handleRequestRandomness}
-              disabled={requestingRandomness}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white px-6 py-3 rounded-md hover:from-blue-700 hover:to-purple-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
-            >
-              {requestingRandomness ? 'Requesting...' : 'Request Randomness'}
-            </button>
-            <p className="text-muted-foreground mt-4 text-center text-sm">
-              The raffle has ended. {userTickets > 0 ? 'As a participant, you can' : 'You can'} request the randomness to initiate winner selection.
-            </p>
-          </>
-        ) : maxPurchasable <= 0 ? (
-          <button
-            disabled
-            className="w-full bg-gray-400 text-white px-6 py-3 rounded-md opacity-60 cursor-not-allowed flex items-center justify-center gap-2 text-lg"
-          >
-            Sold Out
-          </button>
-        ) : userTickets >= raffle.maxTicketsPerParticipant ? (
-          <button
-            disabled
-            className="w-full bg-gray-400 text-white px-6 py-3 rounded-md opacity-60 cursor-not-allowed flex items-center justify-center gap-2 text-lg"
-          >
-            Limit Reached
-          </button>
-        ) : (
-            <>
-              <div>
-                <label className="block text-sm font-medium mb-2">Quantity</label>
-                <input
-                  type="number"
-                  min="1"
-                  max={maxPurchasable}
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, Math.min(maxPurchasable, parseInt(e.target.value) || 1)))}
-                  className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Maximum: {maxPurchasable} tickets
-                </p>
-              </div>
-              <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-md">
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">Total Cost:</span>
-                  <span className="text-lg font-bold">{totalCost} ETH</span>
-                </div>
-              </div>
-              {raffle.stateNum === 0 && canActivate ? (
+        {/* COMPLETED STATE: Show Mint Prize/Claim Prize and/or Claim Refund in main action area, replacing all other actions */}
+        {(raffle.stateNum === 4 || raffle.stateNum === 7) && (canClaimPrize() || canClaimRefund()) ? (
+          <div className="flex flex-col sm:flex-row gap-2 w-full">
+            {/* Mint Prize for mintable (ERC721) prizes, Claim Prize for others */}
+            {canClaimPrize() && (
+              raffle.isPrized && raffle.standard === 0 ? (
                 <button
-                  onClick={handleActivateRaffle}
-                  disabled={activating || !connected}
-                  className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-md hover:from-green-700 hover:to-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+                  onClick={handleClaimPrize}
+                  disabled={claimingPrize || !connected}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 text-white px-6 py-3 rounded-md hover:from-yellow-600 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  <Trophy className="h-4 w-4" />
-                  {activating ? 'Activating...' : 'Activate Raffle'}
-                </button>
-              ) : hasRaffleEndedByTime() ? (
-                <button
-                  onClick={handleEndRaffle}
-                  disabled={endingRaffle || !connected}
-                  className="w-full bg-gradient-to-r from-red-600 to-orange-600 text-white px-6 py-3 rounded-md hover:from-red-700 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
-                >
-                  <Trophy className="h-4 w-4" />
-                  {endingRaffle ? 'Ending...' : 'End Raffle'}
+                  {claimingPrize ? 'Minting...' : 'Mint Prize'}
                 </button>
               ) : (
+                <button
+                  onClick={handleClaimPrize}
+                  disabled={claimingPrize || !connected}
+                  className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 text-white px-6 py-3 rounded-md hover:from-yellow-600 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {claimingPrize ? 'Claiming...' : 'Claim Prize'}
+                </button>
+              )
+            )}
+            {canClaimRefund() && (
+              <button
+                onClick={handleClaimRefund}
+                disabled={claimingRefund || !connected}
+                className="w-full bg-gradient-to-r from-green-500 to-teal-600 text-white px-6 py-3 rounded-md hover:from-green-600 hover:to-teal-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {claimingRefund ? 'Claiming...' : 'Claim Refund'}
+              </button>
+            )}
+          </div>
+        ) : (
+          <>
+            <div>
+              <label className="block text-sm font-medium mb-2">Quantity</label>
+              <input
+                type="number"
+                min="1"
+                max={maxPurchasable}
+                value={quantity}
+                onChange={(e) => setQuantity(Math.max(1, Math.min(maxPurchasable, parseInt(e.target.value) || 1)))}
+                className="w-full px-3 py-2 border border-border rounded-md bg-background"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Maximum: {maxPurchasable} tickets
+              </p>
+            </div>
+            <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-md">
+              <div className="flex justify-between items-center">
+                <span className="font-medium">Total Cost:</span>
+                <span className="text-lg font-bold">{totalCost} ETH</span>
+              </div>
+            </div>
+            {raffle.stateNum === 0 && canActivate ? (
+              <button
+                onClick={handleActivateRaffle}
+                disabled={activating || !connected}
+                className="w-full bg-gradient-to-r from-green-600 to-blue-600 text-white px-6 py-3 rounded-md hover:from-green-700 hover:to-blue-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+              >
+                {activating ? 'Activating...' : 'Activate Raffle'}
+              </button>
+            ) : hasRaffleEndedByTime() ? (
+              <button
+                onClick={handleEndRaffle}
+                disabled={endingRaffle || !connected}
+                className="w-full bg-gradient-to-r from-red-600 to-orange-600 text-white px-6 py-3 rounded-md hover:from-red-700 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 text-lg"
+              >
+                {endingRaffle ? 'Ending...' : 'End Raffle'}
+              </button>
+            ) : (
               <button
                 onClick={handlePurchase}
                 disabled={loading || !connected || !canPurchaseTickets()}
                 className="w-full bg-blue-600 dark:bg-blue-500 text-white px-6 py-3 rounded-md hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                <Ticket className="h-4 w-4" />
                 {loading ? 'Processing...' : `Purchase ${quantity} Ticket${quantity > 1 ? 's' : ''}`}
               </button>
-              )}
-              
-              {/* Claim Prize and Refund buttons - only show when raffle is completed */}
-              {(raffle.stateNum === 4 || raffle.stateNum === 7) && (
-                <div className="space-y-3 mt-4">
-                  {canClaimPrize() && (
-                    <button
-                      onClick={handleClaimPrize}
-                      disabled={claimingPrize || !connected}
-                      className="w-full bg-gradient-to-r from-yellow-500 to-orange-600 text-white px-6 py-3 rounded-md hover:from-yellow-600 hover:to-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <Trophy className="h-4 w-4" />
-                      {claimingPrize ? 'Claiming...' : 'Claim Prize'}
-                    </button>
-                  )}
-                  
-                  {canClaimRefund() && (
-                    <button
-                      onClick={handleClaimRefund}
-                      disabled={claimingRefund || !connected}
-                      className="w-full bg-gradient-to-r from-green-500 to-teal-600 text-white px-6 py-3 rounded-md hover:from-green-600 hover:to-teal-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      <DollarSign className="h-4 w-4" />
-                      {claimingRefund ? 'Claiming...' : 'Claim Refund'}
-                    </button>
-                  )}
-                </div>
-              )}
-            </>
-          )}
+            )}
+          </>
+        )}
 
           {!connected && (
             <div className="text-center py-4">
@@ -777,33 +760,17 @@ const WinnersSection = ({ raffle, isMintableERC721 }) => {
             ) : winners.length > 0 ? (
               <div style={{ maxHeight: '320px', overflowY: 'auto' }} className="px-3">
                 {winners.map((winner, i) => (
-                  connectedAddress && winner.address.toLowerCase() === connectedAddress.toLowerCase() ? (
-                    <div
-                      key={winner.index}
-                      className={`p-[2px] rounded-lg${i !== winners.length - 1 ? ' mb-2' : ''} border-2 border-[#FFD700]`}
+                  <div
+                    key={winner.index}
+                    className={`p-4 bg-background rounded-xl${i !== winners.length - 1 ? ' mb-4' : ''} border-2 ${connectedAddress && winner.address.toLowerCase() === connectedAddress.toLowerCase() ? 'border-[#FFD700]' : 'border-border'}`}
+                  >
+                    <p
+                      className="text-blue-600 dark:text-blue-400 font-mono cursor-pointer underline text-base text-center"
+                      onClick={() => handleWinnerClick(winner, i)}
                     >
-                      <div className="p-2 bg-background rounded-lg w-full h-full">
-                        <p
-                          className="text-blue-600 dark:text-blue-400 font-mono cursor-pointer underline text-xs text-center"
-                          onClick={() => handleWinnerClick(winner, i)}
-                        >
-                          {winner.address}
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      key={winner.index}
-                      className={`p-2 bg-background border border-border rounded-lg${i !== winners.length - 1 ? ' mb-2' : ''}`}
-                    >
-                      <p
-                        className="text-blue-600 dark:text-blue-400 font-mono cursor-pointer underline text-xs text-center"
-                        onClick={() => handleWinnerClick(winner, i)}
-                      >
-                        {winner.address}
-                      </p>
-                    </div>
-                  )
+                      {winner.address}
+                    </p>
+                  </div>
                 ))}
                 {/* Render the modal only once, after the winners list */}
                 {openStatsIndex !== null && winners[openStatsIndex] && (

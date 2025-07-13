@@ -251,7 +251,7 @@ const RaffleSection = ({ title, raffles, icon: Icon, stateKey }) => {
           <Icon className="h-5 w-5" />
           {title}
         </h2>
-        <div className="text-center py-8 bg-gray-100 dark:bg-gray-800 rounded-lg">
+        <div className="text-center py-8 bg-background rounded-lg">
           <Icon className="h-12 w-12 text-gray-500 dark:text-gray-400 mx-auto mb-2" />
           <p className="text-gray-500 dark:text-gray-400">No {title.toLowerCase()} at the moment</p>
         </div>
@@ -528,11 +528,21 @@ const LandingPage = () => {
       </div>
 
       <div className="mt-16">
-        <RaffleSection title="Active Raffles" raffles={active} icon={Clock} stateKey="active" />
-        <RaffleSection title="Pending Raffles" raffles={pending} icon={Users} stateKey="pending" />
-        <RaffleSection title="Drawing Phase" raffles={drawing} icon={Trophy} stateKey="drawing" />
-        <RaffleSection title="Ended Raffles" raffles={ended} icon={Clock} stateKey="ended" />
-        <RaffleSection title="Completed Raffles" raffles={completed} icon={Ticket} stateKey="completed" />
+        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+          <RaffleSection title="Active Raffles" raffles={active} icon={Clock} stateKey="active" />
+        </div>
+        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+          <RaffleSection title="Pending Raffles" raffles={pending} icon={Users} stateKey="pending" />
+        </div>
+        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+          <RaffleSection title="Drawing Phase" raffles={drawing} icon={Trophy} stateKey="drawing" />
+        </div>
+        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+          <RaffleSection title="Ended Raffles" raffles={ended} icon={Clock} stateKey="ended" />
+        </div>
+        <div className="bg-card border border-border rounded-xl p-6 mb-8">
+          <RaffleSection title="Completed Raffles" raffles={completed} icon={Ticket} stateKey="completed" />
+        </div>
       </div>
 
       {raffles.length === 0 && !loading && !error && (
